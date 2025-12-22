@@ -47,6 +47,13 @@ const CodmChecker = () => {
   const [outputFiles, setOutputFiles] = useState<string[]>([]);
   const [foundResults, setFoundResults] = useState<string[]>([]);
   const [fileLines, setFileLines] = useState<string[]>([]);
+  const [checkerResults, setCheckerResults] = useState<{
+    valid: string[];
+    invalid: string[];
+    clean: string[];
+    notClean: string[];
+    hasCodm: string[];
+  }>({ valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] });
   const logIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -85,6 +92,7 @@ const CodmChecker = () => {
     setLogs([]);
     setOutputFiles([]);
     setFoundResults([]);
+    setCheckerResults({ valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] });
   };
 
   const handleRefresh = () => {
@@ -106,6 +114,23 @@ const CodmChecker = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     addLog('Results downloaded!', 'info');
+  };
+
+  const handleDownloadCategory = (category: keyof typeof checkerResults, label: string) => {
+    const results = checkerResults[category];
+    if (results.length === 0) return;
+    
+    const content = results.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${label.toLowerCase().replace(' ', '_')}_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog(`${label} results downloaded!`, 'info');
   };
 
   const handleModeChange = (newMode: Mode) => {
@@ -155,8 +180,9 @@ const CodmChecker = () => {
       return;
     }
 
-    const types: LogEntry['type'][] = ['valid', 'invalid', 'clean', 'notClean', 'hasCodm'];
+    const types: (keyof Stats)[] = ['valid', 'invalid', 'clean', 'notClean', 'hasCodm'];
     let count = 0;
+    const tempResults: typeof checkerResults = { valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] };
 
     addLog(`Processing ${fileLines.length} accounts...`, 'info');
 
@@ -164,6 +190,7 @@ const CodmChecker = () => {
       if (count >= fileLines.length) {
         clearInterval(interval);
         setIsRunning(false);
+        setCheckerResults(tempResults);
         addLog('Checking complete!', 'info');
         return;
       }
@@ -171,11 +198,12 @@ const CodmChecker = () => {
       const line = fileLines[count];
       const randomType = types[Math.floor(Math.random() * types.length)];
       
+      tempResults[randomType].push(line);
       addLog(`[${randomType.toUpperCase()}] ${line}`, randomType);
       
       setStats(prev => ({
         ...prev,
-        [randomType]: prev[randomType as keyof Stats] + 1,
+        [randomType]: prev[randomType] + 1,
       }));
       
       count++;
@@ -389,18 +417,23 @@ const CodmChecker = () => {
       ) : (
         <div className="grid grid-cols-5 gap-2">
           {[
-            { label: 'Valid', value: stats.valid, color: 'text-green-400' },
-            { label: 'Invalid', value: stats.invalid, color: 'text-red-400' },
-            { label: 'Clean', value: stats.clean, color: 'text-blue-400' },
-            { label: 'Not Clean', value: stats.notClean, color: 'text-orange-400' },
-            { label: 'Has CODM', value: stats.hasCodm, color: 'text-purple-400' },
-          ].map((stat, index) => (
+            { label: 'Valid', value: stats.valid, color: 'text-green-400', key: 'valid' as const },
+            { label: 'Invalid', value: stats.invalid, color: 'text-red-400', key: 'invalid' as const },
+            { label: 'Clean', value: stats.clean, color: 'text-blue-400', key: 'clean' as const },
+            { label: 'Not Clean', value: stats.notClean, color: 'text-orange-400', key: 'notClean' as const },
+            { label: 'Has CODM', value: stats.hasCodm, color: 'text-purple-400', key: 'hasCodm' as const },
+          ].map((stat) => (
             <div
-              key={index}
-              className="neon-border rounded-lg bg-card/30 backdrop-blur-sm p-2 sm:p-3 text-center"
+              key={stat.key}
+              className="neon-border rounded-lg bg-card/30 backdrop-blur-sm p-2 sm:p-3 text-center group cursor-pointer hover:bg-card/50 transition-colors"
+              onClick={() => stat.value > 0 && handleDownloadCategory(stat.key, stat.label)}
+              title={stat.value > 0 ? `Click to download ${stat.label} results` : ''}
             >
               <p className="text-muted-foreground text-[10px] sm:text-xs font-medium mb-1 truncate">{stat.label}</p>
               <p className={`text-lg sm:text-xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+              {stat.value > 0 && (
+                <Download className="w-3 h-3 mx-auto mt-1 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              )}
             </div>
           ))}
         </div>
