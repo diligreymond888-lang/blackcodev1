@@ -173,6 +173,50 @@ const CodmChecker = () => {
     addLog('Stopped', 'info');
   };
 
+  const generateAccountDetails = (line: string, status: string) => {
+    const parts = line.split(':');
+    const account = parts[0] || 'Unknown';
+    const password = parts[1] || 'Unknown';
+    
+    const nicknames = ['ProGamer', 'ShadowKill', 'PhantomX', 'DeathStrike', 'NightHawk', 'ViperX', 'StormBreaker', 'IronWolf'];
+    const regions = ['Asia', 'Europe', 'North America', 'South America', 'Middle East', 'Oceania'];
+    const countries = ['Philippines', 'Indonesia', 'India', 'Brazil', 'USA', 'Thailand', 'Vietnam', 'Malaysia'];
+    const bindStatuses = ['Bound', 'Unbound', 'Partial'];
+    const securityLevels = ['High', 'Medium', 'Low', 'None'];
+    
+    return {
+      account,
+      password,
+      nickname: nicknames[Math.floor(Math.random() * nicknames.length)] + Math.floor(Math.random() * 9999),
+      level: Math.floor(Math.random() * 150) + 1,
+      region: regions[Math.floor(Math.random() * regions.length)],
+      uid: Math.floor(Math.random() * 9000000000) + 1000000000,
+      email: account.includes('@') ? account : `${account}@garena.com`,
+      country: countries[Math.floor(Math.random() * countries.length)],
+      bindStatus: bindStatuses[Math.floor(Math.random() * bindStatuses.length)],
+      shellBalance: Math.floor(Math.random() * 10000),
+      security: securityLevels[Math.floor(Math.random() * securityLevels.length)],
+      status
+    };
+  };
+
+  const formatAccountLog = (details: ReturnType<typeof generateAccountDetails>) => {
+    return [
+      `Account: ${details.account}`,
+      `Password: ${details.password}`,
+      `Nickname: ${details.nickname}`,
+      `Level: ${details.level}`,
+      `Region: ${details.region}`,
+      `UID: ${details.uid}`,
+      `Email: ${details.email}`,
+      `Country: ${details.country}`,
+      `Bind Status: ${details.bindStatus}`,
+      `Shell Balance: ${details.shellBalance}`,
+      `Security: ${details.security}`,
+      `Status: ${details.status.toUpperCase()}`
+    ].join(' | ');
+  };
+
   const processChecking = () => {
     if (fileLines.length === 0) {
       addLog('No lines to process!', 'info');
@@ -197,9 +241,11 @@ const CodmChecker = () => {
 
       const line = fileLines[count];
       const randomType = types[Math.floor(Math.random() * types.length)];
+      const details = generateAccountDetails(line, randomType);
+      const formattedLog = formatAccountLog(details);
       
-      tempResults[randomType].push(line);
-      addLog(`[${randomType.toUpperCase()}] ${line}`, randomType);
+      tempResults[randomType].push(formattedLog);
+      addLog(`[${randomType.toUpperCase()}] ${formattedLog}`, randomType);
       
       setStats(prev => ({
         ...prev,
@@ -207,7 +253,7 @@ const CodmChecker = () => {
       }));
       
       count++;
-    }, 150);
+    }, 200);
   };
 
   const simulateSearching = () => {
