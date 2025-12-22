@@ -87,10 +87,6 @@ const CodmChecker = () => {
       addLog('Please select Garena Domain!', 'info');
       return;
     }
-    if (mode === 'searcher' && !file) {
-      addLog('Please select an input file!', 'info');
-      return;
-    }
     
     setIsRunning(true);
     setIsPaused(false);
@@ -255,26 +251,6 @@ const CodmChecker = () => {
               </div>
               <span className="text-foreground text-sm font-medium">Garena Domain.txt</span>
             </div>
-
-            {/* File Upload */}
-            <div 
-              className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3 
-                         flex items-center gap-3 cursor-pointer hover:bg-secondary/50 transition-colors"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="w-4 h-4 text-foreground shrink-0" />
-              <span className="text-muted-foreground text-sm truncate">
-                {file ? file.name : 'Select input file'}
-              </span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,.csv"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </div>
-
             {/* Search Button */}
             <div className="flex justify-center pt-2">
               <button
