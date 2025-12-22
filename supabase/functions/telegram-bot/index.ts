@@ -225,15 +225,32 @@ serve(async (req) => {
     }
 
     // Handle Telegram update
-    const update = await req.json();
+    const text = await req.text();
+    
+    // If body is empty or not valid JSON, just return ok
+    if (!text || text === "{}" || text === "null") {
+      return new Response(JSON.stringify({ ok: true, message: "No update to process" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let update;
+    try {
+      update = JSON.parse(text);
+    } catch {
+      return new Response(JSON.stringify({ ok: true, message: "Invalid JSON, skipping" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     console.log("Received update:", JSON.stringify(update));
 
     if (update.message) {
       const chatId = update.message.chat.id;
-      const text = update.message.text || "";
+      const msgText = update.message.text || "";
       const userId = update.message.from.id;
 
-      await handleCommand(chatId, text, userId);
+      await handleCommand(chatId, msgText, userId);
     }
 
     return new Response(JSON.stringify({ ok: true }), {

@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 
 export const useTelegramWebhook = () => {
   useEffect(() => {
@@ -8,14 +7,7 @@ export const useTelegramWebhook = () => {
       if (webhookSetup) return;
 
       try {
-        const { data, error } = await supabase.functions.invoke("telegram-bot", {
-          body: {},
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
-
-        // Call setup endpoint
+        // Call setup endpoint directly
         const response = await fetch(
           `https://fokxdpkpdtwfhtpjrvdc.supabase.co/functions/v1/telegram-bot?setup=true`
         );
