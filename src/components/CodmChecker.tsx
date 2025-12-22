@@ -75,7 +75,7 @@ const CodmChecker = () => {
     setMenuOpen(false);
     resetStats();
     setFile(null);
-    addLog(`Switched to ${newMode === 'checker' ? 'CODM Checker' : 'ULP Searcher'} mode`, 'info');
+    addLog(`Switched to ${newMode === 'checker' ? 'CODM Checker' : 'Searcher Domain'} mode`, 'info');
   };
 
   const handleStart = () => {
@@ -224,17 +224,17 @@ const CodmChecker = () => {
                 ${mode === 'searcher' ? 'bg-primary/20 text-primary' : 'text-foreground hover:bg-secondary/50'}`}
             >
               <Search className="w-4 h-4" />
-              ULP Searcher
+              Searcher Domain
             </button>
           </div>
         )}
 
         {/* Title */}
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
-          {mode === 'checker' ? 'CODM Checker' : 'ULP Searcher'}
+          {mode === 'checker' ? 'CODM Checker' : 'Searcher Domain'}
         </h1>
         <p className="text-muted-foreground text-xs sm:text-sm text-center mt-1">
-          powered by <span className="text-primary">@egoistyato</span>
+          powered by <span className="text-primary">@BlackCodeHat</span>
         </p>
       </div>
 
