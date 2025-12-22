@@ -16,7 +16,7 @@ const Index = () => {
               Key System
             </h1>
             <p className="text-muted-foreground text-sm">
-              powered by <span className="text-foreground">@egoistyato</span>
+              powered by <span className="text-foreground">@BlackCodeHat</span>
             </p>
           </header>
 
