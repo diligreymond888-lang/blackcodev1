@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Play, Pause, Square, Upload, Search, Menu } from 'lucide-react';
+import { getRandomUniqueEntries } from '@/data/garenaStock';
 
 type Mode = 'checker' | 'searcher';
 
@@ -138,14 +139,15 @@ const CodmChecker = () => {
   };
 
   const simulateSearching = () => {
+    const stockEntries = getRandomUniqueEntries(30);
     let count = 0;
-    const maxCount = 15;
     const results: string[] = [];
 
     addLog('Searching in Garena Domain.txt...', 'info');
+    addLog(`Processing ${stockEntries.length} entries...`, 'info');
 
     const interval = setInterval(() => {
-      if (count >= maxCount) {
+      if (count >= stockEntries.length) {
         clearInterval(interval);
         setIsRunning(false);
         if (results.length > 0) {
@@ -155,28 +157,17 @@ const CodmChecker = () => {
         return;
       }
 
-      const isFound = Math.random() > 0.4;
-      const sampleData = `user${count + 1}@garena.com:password${count}`;
-      
-      if (isFound) {
-        results.push(sampleData);
-        addLog(`[FOUND] ${sampleData}`, 'found');
-        setSearcherStats(prev => ({
-          ...prev,
-          found: prev.found + 1,
-          total: prev.total + 1,
-        }));
-      } else {
-        addLog(`[NOT FOUND] ${sampleData}`, 'notFound');
-        setSearcherStats(prev => ({
-          ...prev,
-          notFound: prev.notFound + 1,
-          total: prev.total + 1,
-        }));
-      }
+      const entry = stockEntries[count];
+      results.push(entry);
+      addLog(`[FOUND] ${entry}`, 'found');
+      setSearcherStats(prev => ({
+        ...prev,
+        found: prev.found + 1,
+        total: prev.total + 1,
+      }));
       
       count++;
-    }, 400);
+    }, 150);
   };
 
   const getLogColor = (type: LogEntry['type']) => {
