@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 
 type Mode = 'checker' | 'searcher';
@@ -45,6 +45,7 @@ const CodmChecker = () => {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [outputFiles, setOutputFiles] = useState<string[]>([]);
+  const [foundResults, setFoundResults] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +70,28 @@ const CodmChecker = () => {
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
     setLogs([]);
     setOutputFiles([]);
+    setFoundResults([]);
+  };
+
+  const handleRefresh = () => {
+    resetStats();
+    addLog('Ready for new search...', 'info');
+  };
+
+  const handleDownload = () => {
+    if (foundResults.length === 0) return;
+    
+    const content = foundResults.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `garena_results_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog('Results downloaded!', 'info');
   };
 
   const handleModeChange = (newMode: Mode) => {
@@ -150,6 +173,7 @@ const CodmChecker = () => {
       if (count >= stockEntries.length) {
         clearInterval(interval);
         setIsRunning(false);
+        setFoundResults(results);
         if (results.length > 0) {
           setOutputFiles([`garena_results_${Date.now()}.txt`]);
         }
@@ -242,17 +266,27 @@ const CodmChecker = () => {
               </div>
               <span className="text-foreground text-sm font-medium">Garena Domain.txt</span>
             </div>
-            {/* Search Button */}
-            <div className="flex justify-center pt-2">
+            {/* Search and Refresh Buttons */}
+            <div className="flex justify-center gap-3 pt-2">
               <button
                 onClick={handleStart}
                 disabled={isRunning || !selectedDomain}
-                className="neon-button px-10 py-3 rounded-lg font-display text-sm font-medium 
+                className="neon-button px-8 py-3 rounded-lg font-display text-sm font-medium 
                            text-foreground hover:scale-105 active:scale-95 transition-transform
                            disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <Search className="w-4 h-4" />
                 Search
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={isRunning}
+                className="neon-button px-6 py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-105 active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
               </button>
             </div>
           </>
@@ -374,7 +408,20 @@ const CodmChecker = () => {
       {/* Output Files (Searcher only) */}
       {mode === 'searcher' && (
         <div className="neon-border rounded-xl bg-card/30 backdrop-blur-sm p-4 min-h-[80px]">
-          <p className="text-muted-foreground text-sm mb-2">Output Files</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-muted-foreground text-sm">Output Files</p>
+            {foundResults.length > 0 && (
+              <button
+                onClick={handleDownload}
+                className="neon-button px-3 py-1.5 rounded-lg text-xs font-medium 
+                           text-foreground hover:scale-105 active:scale-95 transition-transform
+                           flex items-center gap-1.5"
+              >
+                <Download className="w-3 h-3" />
+                Download
+              </button>
+            )}
+          </div>
           {outputFiles.length === 0 ? (
             <p className="text-muted-foreground/50 text-xs">No output files yet...</p>
           ) : (
