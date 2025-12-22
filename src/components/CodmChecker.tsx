@@ -46,18 +46,32 @@ const CodmChecker = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [outputFiles, setOutputFiles] = useState<string[]>([]);
   const [foundResults, setFoundResults] = useState<string[]>([]);
+  const [fileLines, setFileLines] = useState<string[]>([]);
+  const logIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      addLog(`File selected: ${e.target.files[0].name}`, 'info');
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+      addLog(`File selected: ${selectedFile.name}`, 'info');
+      
+      // Read file contents
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        const lines = content.split('\n').filter(line => line.trim() !== '');
+        setFileLines(lines);
+        addLog(`Loaded ${lines.length} lines from file`, 'info');
+      };
+      reader.readAsText(selectedFile);
     }
   };
 
   const addLog = (message: string, type: LogEntry['type']) => {
-    setLogs(prev => [...prev, { id: Date.now(), message, type }]);
+    logIdRef.current += 1;
+    setLogs(prev => [...prev, { id: logIdRef.current, message, type }]);
     setTimeout(() => {
       if (logContainerRef.current) {
         logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
@@ -117,7 +131,7 @@ const CodmChecker = () => {
     addLog(`Starting ${mode === 'checker' ? 'checker' : 'searcher'}...`, 'info');
     
     if (mode === 'checker') {
-      simulateChecking();
+      processChecking();
     } else {
       simulateSearching();
     }
@@ -134,23 +148,30 @@ const CodmChecker = () => {
     addLog('Stopped', 'info');
   };
 
-  const simulateChecking = () => {
+  const processChecking = () => {
+    if (fileLines.length === 0) {
+      addLog('No lines to process!', 'info');
+      setIsRunning(false);
+      return;
+    }
+
     const types: LogEntry['type'][] = ['valid', 'invalid', 'clean', 'notClean', 'hasCodm'];
     let count = 0;
-    const maxCount = 10;
+
+    addLog(`Processing ${fileLines.length} accounts...`, 'info');
 
     const interval = setInterval(() => {
-      if (count >= maxCount) {
+      if (count >= fileLines.length) {
         clearInterval(interval);
         setIsRunning(false);
         addLog('Checking complete!', 'info');
         return;
       }
 
+      const line = fileLines[count];
       const randomType = types[Math.floor(Math.random() * types.length)];
-      const sampleData = `account${count + 1}@example.com`;
       
-      addLog(`[${randomType.toUpperCase()}] ${sampleData}`, randomType);
+      addLog(`[${randomType.toUpperCase()}] ${line}`, randomType);
       
       setStats(prev => ({
         ...prev,
@@ -158,7 +179,7 @@ const CodmChecker = () => {
       }));
       
       count++;
-    }, 500);
+    }, 150);
   };
 
   const simulateSearching = () => {
