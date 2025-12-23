@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
-interface KeyInputProps {
-  onValidKey: () => void;
-}
-
-interface KeyInfo {
+export interface KeyInfo {
   status: string;
   duration: string;
+}
+
+interface KeyInputProps {
+  onValidKey: (keyInfo: KeyInfo) => void;
 }
 
 const KeyInput = ({ onValidKey }: KeyInputProps) => {
@@ -89,12 +89,13 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
 
       // Key is valid!
       const duration = calculateDuration(data.expires_at, data.is_lifetime);
-      setKeyInfo({ status: 'Valid', duration });
+      const info = { status: 'Valid', duration };
+      setKeyInfo(info);
       toast.success('Key validated successfully!');
       
       // Small delay to show the status before transitioning
       setTimeout(() => {
-        onValidKey();
+        onValidKey(info);
       }, 1500);
     } catch (err) {
       console.error('Error:', err);
