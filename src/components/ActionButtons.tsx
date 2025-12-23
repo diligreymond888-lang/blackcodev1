@@ -4,7 +4,7 @@ const ActionButtons = () => {
   return (
     <div className="flex justify-center">
       <a
-        href="https://t.me/egoistyato"
+        href="https://t.me/BlackCodeHat"
         target="_blank"
         rel="noopener noreferrer"
         className="neon-button flex items-center gap-2 px-8 py-3 rounded-lg 
