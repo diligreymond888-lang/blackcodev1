@@ -4,6 +4,15 @@ import { getRandomUniqueEntries } from '@/data/garenaStock';
 
 type Mode = 'checker' | 'searcher';
 
+interface KeyInfo {
+  status: string;
+  duration: string;
+}
+
+interface CodmCheckerProps {
+  keyInfo: KeyInfo | null;
+}
+
 interface Stats {
   valid: number;
   invalid: number;
@@ -24,7 +33,7 @@ interface LogEntry {
   type: 'valid' | 'invalid' | 'clean' | 'notClean' | 'hasCodm' | 'info' | 'found' | 'notFound';
 }
 
-const CodmChecker = () => {
+const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const [mode, setMode] = useState<Mode>('checker');
   const [menuOpen, setMenuOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -339,9 +348,22 @@ const CodmChecker = () => {
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
           {mode === 'checker' ? 'CODM Checker' : 'Searcher Domain'}
         </h1>
-        <p className="text-muted-foreground text-xs sm:text-sm text-center mt-1">
-          powered by <span className="text-primary">@BlackCodeHat</span>
-        </p>
+        <div className="flex items-center justify-center gap-3 mt-1">
+          <p className="text-muted-foreground text-xs sm:text-sm">
+            powered by <span className="text-primary">@BlackCodeHat</span>
+          </p>
+          {keyInfo && (
+            <>
+              <span className="text-muted-foreground/50 text-xs">•</span>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  keyInfo.status === 'Valid' ? 'bg-green-500' : 'bg-red-500'
+                }`} />
+                <span className="text-muted-foreground">{keyInfo.duration}</span>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Main Content Area */}

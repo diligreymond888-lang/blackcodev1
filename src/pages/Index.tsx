@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
-import KeyInput from '@/components/KeyInput';
+import KeyInput, { KeyInfo } from '@/components/KeyInput';
 import PricingTable from '@/components/PricingTable';
 import ActionButtons from '@/components/ActionButtons';
 import CodmChecker from '@/components/CodmChecker';
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
 
-  const handleValidKey = () => {
+  const handleValidKey = (info: KeyInfo) => {
+    setKeyInfo(info);
     setIsAuthenticated(true);
   };
 
@@ -48,7 +50,7 @@ const Index = () => {
           ) : (
             /* CODM Checker Interface */
             <section>
-              <CodmChecker />
+              <CodmChecker keyInfo={keyInfo} />
             </section>
           )}
         </div>
