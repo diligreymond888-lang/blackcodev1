@@ -229,117 +229,168 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
 
   const processChecking = async () => {
     if (fileLines.length === 0) {
-      addLog('No lines to process!', 'info');
+      addLog('Please upload a file first!', 'info');
+      toast.error('No file selected. Please upload a .txt file with accounts.');
       setIsRunning(false);
       return;
     }
 
-    addLog(`Processing ${fileLines.length} accounts via API...`, 'info');
+    // Validate file format
+    const validLines = fileLines.filter(line => {
+      const parts = line.split(':');
+      return parts.length >= 2 && parts[0].trim() && parts[1].trim();
+    });
+
+    if (validLines.length === 0) {
+      addLog('No valid accounts found! Format: email:password', 'info');
+      toast.error('Invalid file format. Each line should be: email:password');
+      setIsRunning(false);
+      return;
+    }
+
+    if (validLines.length !== fileLines.length) {
+      addLog(`Found ${validLines.length} valid accounts (${fileLines.length - validLines.length} skipped)`, 'info');
+    }
+
+    addLog(`Processing ${validLines.length} accounts via API...`, 'info');
     
     const tempResults: typeof checkerResults = { valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] };
-    const batchSize = 3; // Process 3 accounts at a time
+    const batchSize = 5; // Match server limit
+    const maxRetries = 3;
     
-    for (let i = 0; i < fileLines.length; i += batchSize) {
-      if (!isRunning) break;
-      
-      const batch = fileLines.slice(i, Math.min(i + batchSize, fileLines.length));
-      
-      try {
-        addLog(`Checking batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(fileLines.length / batchSize)}...`, 'info');
-        
-        const { data, error } = await supabase.functions.invoke('codm-checker', {
-          body: { accounts: batch }
-        });
-
-        if (error) {
-          addLog(`API Error: ${error.message}`, 'invalid');
-          // Fallback to simulated results for this batch
-          for (const line of batch) {
-            const randomStatus = Math.random();
-            let status: keyof Stats;
-            if (randomStatus < 0.3) status = 'invalid';
-            else if (randomStatus < 0.5) status = 'clean';
-            else if (randomStatus < 0.7) status = 'notClean';
-            else if (randomStatus < 0.85) status = 'hasCodm';
-            else status = 'valid';
-            
-            const details = generateAccountDetails(line, status);
-            const formattedLog = formatAccountLog(details);
-            tempResults[status].push(formattedLog);
-            addLog(`[${status.toUpperCase()}] ${formattedLog}`, status);
-            setStats(prev => ({ ...prev, [status]: prev[status] + 1 }));
-          }
-          continue;
-        }
-
-        if (data?.results) {
-          for (const result of data.results) {
-            let logType: LogEntry['type'] = 'info';
-            let statKey: keyof Stats | null = null;
-            let formattedLog = '';
-            
-            if (result.status === 'valid') {
-              const details = result.details || {};
-              const codm = result.codm || {};
-              
-              formattedLog = [
-                `Account: ${result.account}`,
-                `Password: ${result.password}`,
-                `Nickname: ${details.nickname || 'N/A'}`,
-                `UID: ${details.uid || 'N/A'}`,
-                `Email: ${details.email || 'N/A'}`,
-                `Country: ${details.country || 'N/A'}`,
-                `Shell: ${details.shell_balance || 0}`,
-                `Bind: ${details.bind_status || 'N/A'}`,
-                result.hasCodm ? `CODM: ${codm.codm_nickname} (Lv.${codm.codm_level})` : 'CODM: No',
-                `Status: ${result.isClean ? 'CLEAN' : 'NOT CLEAN'}`
-              ].join(' | ');
-              
-              if (result.hasCodm) {
-                logType = 'hasCodm';
-                statKey = 'hasCodm';
-              } else if (result.isClean) {
-                logType = 'clean';
-                statKey = 'clean';
-              } else {
-                logType = 'notClean';
-                statKey = 'notClean';
-              }
-              
-              // Also count as valid
-              setStats(prev => ({ ...prev, valid: prev.valid + 1 }));
-              tempResults.valid.push(formattedLog);
-              
-            } else if (result.status === 'invalid') {
-              formattedLog = `Account: ${result.account || 'Unknown'} | Status: INVALID | ${result.message || 'Login failed'}`;
-              logType = 'invalid';
-              statKey = 'invalid';
-            } else {
-              formattedLog = `Account: ${result.account || 'Unknown'} | Status: ERROR | ${result.message || 'Unknown error'}`;
-              logType = 'invalid';
-              statKey = 'invalid';
-            }
-            
-            if (statKey) {
-              tempResults[statKey].push(formattedLog);
-              setStats(prev => ({ ...prev, [statKey]: prev[statKey] + 1 }));
-            }
-            
-            addLog(`[${(statKey || 'info').toUpperCase()}] ${formattedLog}`, logType);
-          }
-        }
-      } catch (err) {
-        addLog(`Error processing batch: ${err}`, 'invalid');
+    for (let i = 0; i < validLines.length; i += batchSize) {
+      if (!isRunning) {
+        addLog('Checking stopped by user.', 'info');
+        break;
       }
       
-      // Small delay between batches
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const batch = validLines.slice(i, Math.min(i + batchSize, validLines.length));
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(validLines.length / batchSize);
+      
+      let retryCount = 0;
+      let success = false;
+      
+      while (!success && retryCount < maxRetries) {
+        try {
+          addLog(`Checking batch ${batchNum}/${totalBatches}${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`, 'info');
+          
+          const { data, error } = await supabase.functions.invoke('codm-checker', {
+            body: { accounts: batch }
+          });
+
+          if (error) {
+            // Check if it's a rate limit error
+            if (error.message?.includes('429') || error.message?.includes('rate limit')) {
+              const waitTime = 60; // Wait 60 seconds on rate limit
+              addLog(`Rate limited! Waiting ${waitTime}s before retry...`, 'info');
+              toast.warning(`Rate limited. Waiting ${waitTime} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+              retryCount++;
+              continue;
+            }
+            
+            addLog(`API Error: ${error.message}`, 'invalid');
+            retryCount++;
+            
+            if (retryCount < maxRetries) {
+              const waitTime = retryCount * 5;
+              addLog(`Retrying in ${waitTime}s...`, 'info');
+              await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+            }
+            continue;
+          }
+
+          success = true;
+
+          if (data?.results) {
+            for (const result of data.results) {
+              let logType: LogEntry['type'] = 'info';
+              let statKey: keyof Stats | null = null;
+              let formattedLog = '';
+              
+              if (result.status === 'valid') {
+                const details = result.details || {};
+                const codm = result.codm || {};
+                
+                formattedLog = [
+                  `Account: ${result.account}`,
+                  `Password: ${result.password}`,
+                  `Nickname: ${details.nickname || 'N/A'}`,
+                  `UID: ${details.uid || 'N/A'}`,
+                  `Email: ${details.email || 'N/A'}`,
+                  `Country: ${details.country || 'N/A'}`,
+                  `Shell: ${details.shell_balance || 0}`,
+                  `Bind: ${details.bind_status || 'N/A'}`,
+                  result.hasCodm ? `CODM: ${codm.codm_nickname} (Lv.${codm.codm_level})` : 'CODM: No',
+                  `Status: ${result.isClean ? 'CLEAN' : 'NOT CLEAN'}`
+                ].join(' | ');
+                
+                if (result.hasCodm) {
+                  logType = 'hasCodm';
+                  statKey = 'hasCodm';
+                } else if (result.isClean) {
+                  logType = 'clean';
+                  statKey = 'clean';
+                } else {
+                  logType = 'notClean';
+                  statKey = 'notClean';
+                }
+                
+                // Also count as valid
+                setStats(prev => ({ ...prev, valid: prev.valid + 1 }));
+                tempResults.valid.push(formattedLog);
+                
+              } else if (result.status === 'invalid') {
+                formattedLog = `Account: ${result.account || 'Unknown'} | Status: INVALID | ${result.message || 'Login failed'}`;
+                logType = 'invalid';
+                statKey = 'invalid';
+              } else {
+                formattedLog = `Account: ${result.account || 'Unknown'} | Status: ERROR | ${result.message || 'Unknown error'}`;
+                logType = 'invalid';
+                statKey = 'invalid';
+              }
+              
+              if (statKey) {
+                tempResults[statKey].push(formattedLog);
+                setStats(prev => ({ ...prev, [statKey]: prev[statKey] + 1 }));
+              }
+              
+              addLog(`[${(statKey || 'info').toUpperCase()}] ${formattedLog}`, logType);
+            }
+          }
+        } catch (err) {
+          addLog(`Error processing batch: ${err}`, 'invalid');
+          retryCount++;
+          
+          if (retryCount < maxRetries) {
+            const waitTime = retryCount * 5;
+            addLog(`Retrying in ${waitTime}s...`, 'info');
+            await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+          }
+        }
+      }
+      
+      if (!success) {
+        addLog(`Failed to process batch ${batchNum} after ${maxRetries} retries`, 'invalid');
+        // Mark all accounts in failed batch as errors
+        for (const line of batch) {
+          const account = line.split(':')[0];
+          tempResults.invalid.push(`Account: ${account} | Status: ERROR | Failed after retries`);
+          setStats(prev => ({ ...prev, invalid: prev.invalid + 1 }));
+        }
+      }
+      
+      // Delay between batches to respect rate limits
+      if (i + batchSize < validLines.length && isRunning) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
     
     setIsRunning(false);
     setCheckerResults(tempResults);
     addLog('Checking complete!', 'info');
-    toast.success('Account checking completed!');
+    toast.success(`Completed! Valid: ${tempResults.valid.length}, Invalid: ${tempResults.invalid.length}`);
   };
 
   const simulateSearching = () => {

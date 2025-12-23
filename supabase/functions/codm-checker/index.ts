@@ -1,9 +1,64 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Rate limiting configuration
+const RATE_LIMIT_MAX_REQUESTS = 10; // Max requests per window
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute window
+const MAX_ACCOUNTS_PER_REQUEST = 5; // Max accounts per single request
+const RETRY_DELAYS = [1000, 2000, 5000]; // Retry delays in ms
+
+// In-memory rate limit store (resets on function cold start)
+const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
+
+function checkRateLimit(clientId: string): { allowed: boolean; retryAfter?: number } {
+  const now = Date.now();
+  const record = rateLimitStore.get(clientId);
+  
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+    // New window
+    rateLimitStore.set(clientId, { count: 1, windowStart: now });
+    return { allowed: true };
+  }
+  
+  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
+    const retryAfter = Math.ceil((record.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+  
+  record.count++;
+  return { allowed: true };
+}
+
+// Retry wrapper for API calls
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  context: string = 'API call'
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      console.log(`[RETRY] ${context} attempt ${attempt + 1}/${maxRetries + 1} failed: ${error}`);
+      
+      if (attempt < maxRetries) {
+        const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
+        console.log(`[RETRY] Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError;
+}
 
 // AES ECB encryption for password hashing (simplified for Deno)
 function hexToBytes(hex: string): Uint8Array {
@@ -612,6 +667,35 @@ serve(async (req) => {
   }
 
   try {
+    // Get client identifier for rate limiting
+    const clientIp = req.headers.get('x-forwarded-for') || 
+                     req.headers.get('x-real-ip') || 
+                     'unknown';
+    const clientId = clientIp.split(',')[0].trim();
+    
+    console.log(`[REQUEST] Incoming request from client: ${clientId}`);
+    
+    // Check rate limit
+    const rateCheck = checkRateLimit(clientId);
+    if (!rateCheck.allowed) {
+      console.log(`[RATE_LIMIT] Client ${clientId} exceeded rate limit`);
+      return new Response(
+        JSON.stringify({ 
+          error: "Rate limit exceeded", 
+          retryAfter: rateCheck.retryAfter,
+          message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "application/json",
+            "Retry-After": String(rateCheck.retryAfter)
+          } 
+        }
+      );
+    }
+
     const { accounts } = await req.json();
     
     if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
@@ -621,28 +705,62 @@ serve(async (req) => {
       );
     }
 
-    // Process accounts one by one
+    // Limit accounts per request to prevent abuse
+    if (accounts.length > MAX_ACCOUNTS_PER_REQUEST) {
+      console.log(`[LIMIT] Request exceeded max accounts: ${accounts.length}/${MAX_ACCOUNTS_PER_REQUEST}`);
+      return new Response(
+        JSON.stringify({ 
+          error: "Too many accounts", 
+          message: `Maximum ${MAX_ACCOUNTS_PER_REQUEST} accounts per request. You sent ${accounts.length}.`
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`[PROCESS] Processing ${accounts.length} accounts for client ${clientId}`);
+
+    // Process accounts one by one with retry logic
     const results = [];
     for (const acc of accounts) {
       const [account, password] = acc.split(':');
       if (!account || !password) {
-        results.push({ status: 'error', message: 'Invalid format', account: acc });
+        results.push({ status: 'error', message: 'Invalid format (use email:password)', account: acc });
         continue;
       }
       
-      const result = await checkAccount(account.trim(), password.trim());
-      results.push(result);
+      try {
+        const result = await withRetry(
+          () => checkAccount(account.trim(), password.trim()),
+          2,
+          `Check account ${account}`
+        );
+        results.push(result);
+        console.log(`[RESULT] ${account}: ${result.status}`);
+      } catch (error) {
+        console.error(`[ERROR] Failed to check ${account} after retries:`, error);
+        results.push({ 
+          status: 'error', 
+          message: 'Failed after multiple retries', 
+          account: account.trim() 
+        });
+      }
       
-      // Small delay between requests to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Delay between accounts to avoid rate limiting from Garena API
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
 
+    console.log(`[COMPLETE] Processed ${results.length} accounts for client ${clientId}`);
+
     return new Response(
-      JSON.stringify({ results }),
+      JSON.stringify({ 
+        results,
+        processed: results.length,
+        timestamp: new Date().toISOString()
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error:", error);
+    console.error("[ERROR] Request failed:", error);
     return new Response(
       JSON.stringify({ error: String(error) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
