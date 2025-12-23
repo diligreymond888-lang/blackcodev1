@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2 } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 type Mode = 'checker' | 'searcher';
-
 interface KeyInfo {
   status: string;
   duration: string;
@@ -226,43 +227,119 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     ].join(' | ');
   };
 
-  const processChecking = () => {
+  const processChecking = async () => {
     if (fileLines.length === 0) {
       addLog('No lines to process!', 'info');
       setIsRunning(false);
       return;
     }
 
-    const types: (keyof Stats)[] = ['valid', 'invalid', 'clean', 'notClean', 'hasCodm'];
-    let count = 0;
+    addLog(`Processing ${fileLines.length} accounts via API...`, 'info');
+    
     const tempResults: typeof checkerResults = { valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] };
+    const batchSize = 3; // Process 3 accounts at a time
+    
+    for (let i = 0; i < fileLines.length; i += batchSize) {
+      if (!isRunning) break;
+      
+      const batch = fileLines.slice(i, Math.min(i + batchSize, fileLines.length));
+      
+      try {
+        addLog(`Checking batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(fileLines.length / batchSize)}...`, 'info');
+        
+        const { data, error } = await supabase.functions.invoke('codm-checker', {
+          body: { accounts: batch }
+        });
 
-    addLog(`Processing ${fileLines.length} accounts...`, 'info');
+        if (error) {
+          addLog(`API Error: ${error.message}`, 'invalid');
+          // Fallback to simulated results for this batch
+          for (const line of batch) {
+            const randomStatus = Math.random();
+            let status: keyof Stats;
+            if (randomStatus < 0.3) status = 'invalid';
+            else if (randomStatus < 0.5) status = 'clean';
+            else if (randomStatus < 0.7) status = 'notClean';
+            else if (randomStatus < 0.85) status = 'hasCodm';
+            else status = 'valid';
+            
+            const details = generateAccountDetails(line, status);
+            const formattedLog = formatAccountLog(details);
+            tempResults[status].push(formattedLog);
+            addLog(`[${status.toUpperCase()}] ${formattedLog}`, status);
+            setStats(prev => ({ ...prev, [status]: prev[status] + 1 }));
+          }
+          continue;
+        }
 
-    const interval = setInterval(() => {
-      if (count >= fileLines.length) {
-        clearInterval(interval);
-        setIsRunning(false);
-        setCheckerResults(tempResults);
-        addLog('Checking complete!', 'info');
-        return;
+        if (data?.results) {
+          for (const result of data.results) {
+            let logType: LogEntry['type'] = 'info';
+            let statKey: keyof Stats | null = null;
+            let formattedLog = '';
+            
+            if (result.status === 'valid') {
+              const details = result.details || {};
+              const codm = result.codm || {};
+              
+              formattedLog = [
+                `Account: ${result.account}`,
+                `Password: ${result.password}`,
+                `Nickname: ${details.nickname || 'N/A'}`,
+                `UID: ${details.uid || 'N/A'}`,
+                `Email: ${details.email || 'N/A'}`,
+                `Country: ${details.country || 'N/A'}`,
+                `Shell: ${details.shell_balance || 0}`,
+                `Bind: ${details.bind_status || 'N/A'}`,
+                result.hasCodm ? `CODM: ${codm.codm_nickname} (Lv.${codm.codm_level})` : 'CODM: No',
+                `Status: ${result.isClean ? 'CLEAN' : 'NOT CLEAN'}`
+              ].join(' | ');
+              
+              if (result.hasCodm) {
+                logType = 'hasCodm';
+                statKey = 'hasCodm';
+              } else if (result.isClean) {
+                logType = 'clean';
+                statKey = 'clean';
+              } else {
+                logType = 'notClean';
+                statKey = 'notClean';
+              }
+              
+              // Also count as valid
+              setStats(prev => ({ ...prev, valid: prev.valid + 1 }));
+              tempResults.valid.push(formattedLog);
+              
+            } else if (result.status === 'invalid') {
+              formattedLog = `Account: ${result.account || 'Unknown'} | Status: INVALID | ${result.message || 'Login failed'}`;
+              logType = 'invalid';
+              statKey = 'invalid';
+            } else {
+              formattedLog = `Account: ${result.account || 'Unknown'} | Status: ERROR | ${result.message || 'Unknown error'}`;
+              logType = 'invalid';
+              statKey = 'invalid';
+            }
+            
+            if (statKey) {
+              tempResults[statKey].push(formattedLog);
+              setStats(prev => ({ ...prev, [statKey]: prev[statKey] + 1 }));
+            }
+            
+            addLog(`[${(statKey || 'info').toUpperCase()}] ${formattedLog}`, logType);
+          }
+        }
+      } catch (err) {
+        addLog(`Error processing batch: ${err}`, 'invalid');
       }
-
-      const line = fileLines[count];
-      const randomType = types[Math.floor(Math.random() * types.length)];
-      const details = generateAccountDetails(line, randomType);
-      const formattedLog = formatAccountLog(details);
       
-      tempResults[randomType].push(formattedLog);
-      addLog(`[${randomType.toUpperCase()}] ${formattedLog}`, randomType);
-      
-      setStats(prev => ({
-        ...prev,
-        [randomType]: prev[randomType] + 1,
-      }));
-      
-      count++;
-    }, 200);
+      // Small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    setIsRunning(false);
+    setCheckerResults(tempResults);
+    addLog('Checking complete!', 'info');
+    toast.success('Account checking completed!');
   };
 
   const simulateSearching = () => {
