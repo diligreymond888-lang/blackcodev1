@@ -348,22 +348,14 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
           {mode === 'checker' ? 'CODM Checker' : 'Searcher Domain'}
         </h1>
-        <div className="flex items-center justify-center gap-3 mt-1">
-          <p className="text-muted-foreground text-xs sm:text-sm">
-            powered by <span className="text-primary">@BlackCodeHat</span>
-          </p>
-          {keyInfo && (
-            <>
-              <span className="text-muted-foreground/50 text-xs">•</span>
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  keyInfo.status === 'Valid' ? 'bg-green-500' : 'bg-red-500'
-                }`} />
-                <span className="text-muted-foreground">{keyInfo.duration}</span>
-              </div>
-            </>
-          )}
-        </div>
+        {keyInfo && (
+          <div className="flex items-center justify-center gap-1.5 mt-1 text-xs">
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              keyInfo.status === 'Valid' ? 'bg-green-500' : 'bg-red-500'
+            }`} />
+            <span className="text-muted-foreground">{keyInfo.duration}</span>
+          </div>
+        )}
       </div>
 
       {/* Main Content Area */}
