@@ -49,6 +49,7 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `❌ <b>/deletekey [key]</b> - Delete a key\n` +
         `✅ <b>/activate [key]</b> - Activate a key\n` +
         `⏸ <b>/deactivate [key]</b> - Deactivate a key\n` +
+        `🔄 <b>/resetkey [key]</b> - Reset key (mark as unused)\n` +
         `📊 <b>/stats</b> - Show statistics`
       );
       break;
@@ -71,13 +72,15 @@ async function handleCommand(chatId: number, text: string, userId: number) {
 
       let message = "🔑 <b>Access Keys:</b>\n\n";
       for (const key of keys) {
-        const status = key.is_active ? "✅" : "❌";
+        const activeStatus = key.is_active ? "✅" : "❌";
+        const usedStatus = key.is_used ? "🔴 Used" : "🟢 Available";
         const expiry = key.is_lifetime
           ? "♾ Lifetime"
           : key.expires_at
           ? `⏰ ${new Date(key.expires_at).toLocaleDateString()}`
           : "No expiry";
-        message += `${status} <code>${key.key_value}</code>\n   ${expiry}\n\n`;
+        const usedAt = key.used_at ? `\n   📅 Used: ${new Date(key.used_at).toLocaleString()}` : "";
+        message += `${activeStatus} <code>${key.key_value}</code>\n   ${usedStatus} | ${expiry}${usedAt}\n\n`;
       }
       await sendTelegramMessage(chatId, message);
       break;
@@ -97,6 +100,8 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         is_lifetime: isLifetime,
         expires_at: expiresAt,
         is_active: true,
+        is_used: false,
+        used_at: null,
       });
 
       if (addError) {
@@ -106,7 +111,8 @@ async function handleCommand(chatId: number, text: string, userId: number) {
           chatId,
           `✅ Key added successfully!\n\n` +
           `🔑 Key: <code>${newKey}</code>\n` +
-          `⏰ ${isLifetime ? "Lifetime" : `Expires in ${days} days`}`
+          `⏰ ${isLifetime ? "Lifetime" : `Expires in ${days} days`}\n` +
+          `📌 Status: Available (single-use)`
         );
       }
       break;
@@ -168,6 +174,25 @@ async function handleCommand(chatId: number, text: string, userId: number) {
       }
       break;
 
+    case "/resetkey":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /resetkey [key_value]\nThis will mark the key as unused so it can be used again.");
+        return;
+      }
+      const keyToReset = parts[1];
+
+      const { error: resetError } = await supabase
+        .from("access_keys")
+        .update({ is_used: false, used_at: null })
+        .eq("key_value", keyToReset);
+
+      if (resetError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${resetError.message}`);
+      } else {
+        await sendTelegramMessage(chatId, `🔄 Key <code>${keyToReset}</code> reset. It can now be used again.`);
+      }
+      break;
+
     case "/stats":
       const { data: allKeys, error: statsError } = await supabase
         .from("access_keys")
@@ -180,6 +205,8 @@ async function handleCommand(chatId: number, text: string, userId: number) {
 
       const totalKeys = allKeys?.length || 0;
       const activeKeys = allKeys?.filter((k) => k.is_active).length || 0;
+      const usedKeys = allKeys?.filter((k) => k.is_used).length || 0;
+      const availableKeys = allKeys?.filter((k) => k.is_active && !k.is_used).length || 0;
       const lifetimeKeys = allKeys?.filter((k) => k.is_lifetime).length || 0;
       const expiredKeys = allKeys?.filter(
         (k) => !k.is_lifetime && k.expires_at && new Date(k.expires_at) < new Date()
@@ -191,6 +218,8 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `📦 Total Keys: ${totalKeys}\n` +
         `✅ Active: ${activeKeys}\n` +
         `❌ Inactive: ${totalKeys - activeKeys}\n` +
+        `🟢 Available: ${availableKeys}\n` +
+        `🔴 Used: ${usedKeys}\n` +
         `♾ Lifetime: ${lifetimeKeys}\n` +
         `⏰ Expired: ${expiredKeys}`
       );
