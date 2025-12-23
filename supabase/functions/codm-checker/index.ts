@@ -251,20 +251,146 @@ async function sha256(message: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// AES ECB encryption (simplified - using XOR for demo, real AES would need a library)
+// AES ECB encryption implementation
 function aesEcbEncrypt(plaintext: string, key: string): string {
-  // For the Garena API, we need the first 32 chars of the result
-  // This is a simplified version - the actual encode function XORs the MD5 with the key
   const plaintextBytes = hexToBytes(plaintext);
   const keyBytes = hexToBytes(key);
   
-  // Simple XOR-based encryption (approximation of what the Python AES ECB does for this use case)
-  const result = new Uint8Array(16);
+  // AES S-box
+  const sBox = [
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
+  ];
+
+  const rCon = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
+
+  function subBytes(state: number[][]): void {
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        state[i][j] = sBox[state[i][j]];
+      }
+    }
+  }
+
+  function shiftRows(state: number[][]): void {
+    for (let i = 1; i < 4; i++) {
+      const temp = state[i].slice(0, i);
+      for (let j = 0; j < 4 - i; j++) {
+        state[i][j] = state[i][j + i];
+      }
+      for (let j = 0; j < i; j++) {
+        state[i][4 - i + j] = temp[j];
+      }
+    }
+  }
+
+  function xtime(x: number): number {
+    return ((x << 1) ^ (((x >>> 7) & 1) * 0x1b)) & 0xff;
+  }
+
+  function mixColumns(state: number[][]): void {
+    for (let i = 0; i < 4; i++) {
+      const a = state[0][i];
+      const b = state[1][i];
+      const c = state[2][i];
+      const d = state[3][i];
+      state[0][i] = xtime(a) ^ xtime(b) ^ b ^ c ^ d;
+      state[1][i] = a ^ xtime(b) ^ xtime(c) ^ c ^ d;
+      state[2][i] = a ^ b ^ xtime(c) ^ xtime(d) ^ d;
+      state[3][i] = xtime(a) ^ a ^ b ^ c ^ xtime(d);
+    }
+  }
+
+  function addRoundKey(state: number[][], roundKey: number[][]): void {
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        state[i][j] ^= roundKey[i][j];
+      }
+    }
+  }
+
+  function keyExpansion(key: Uint8Array): number[][][] {
+    const roundKeys: number[][][] = [];
+    const w: number[][] = [];
+    
+    // First round key is the key itself
+    for (let i = 0; i < 4; i++) {
+      w[i] = [key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]];
+    }
+    
+    for (let i = 4; i < 44; i++) {
+      const temp = w[i - 1].slice();
+      if (i % 4 === 0) {
+        const rotated = [temp[1], temp[2], temp[3], temp[0]];
+        const subbed = rotated.map(b => sBox[b]);
+        subbed[0] ^= rCon[(i / 4) - 1];
+        for (let j = 0; j < 4; j++) {
+          temp[j] = subbed[j];
+        }
+      }
+      w[i] = [];
+      for (let j = 0; j < 4; j++) {
+        w[i][j] = w[i - 4][j] ^ temp[j];
+      }
+    }
+    
+    for (let round = 0; round < 11; round++) {
+      const roundKey: number[][] = [[], [], [], []];
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          roundKey[j][i] = w[round * 4 + i][j];
+        }
+      }
+      roundKeys.push(roundKey);
+    }
+    
+    return roundKeys;
+  }
+
+  // Encrypt single block
+  const state: number[][] = [[], [], [], []];
   for (let i = 0; i < 16; i++) {
-    result[i] = plaintextBytes[i % plaintextBytes.length] ^ keyBytes[i % keyBytes.length];
+    state[i % 4][Math.floor(i / 4)] = plaintextBytes[i] || 0;
+  }
+
+  const roundKeys = keyExpansion(keyBytes.slice(0, 32));
+  
+  addRoundKey(state, roundKeys[0]);
+  
+  for (let round = 1; round < 10; round++) {
+    subBytes(state);
+    shiftRows(state);
+    mixColumns(state);
+    addRoundKey(state, roundKeys[round]);
   }
   
-  return bytesToHex(result);
+  subBytes(state);
+  shiftRows(state);
+  addRoundKey(state, roundKeys[10]);
+  
+  // Extract result
+  const result = new Uint8Array(16);
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      result[i * 4 + j] = state[j][i];
+    }
+  }
+  
+  return bytesToHex(result).substring(0, 32);
 }
 
 async function hashPassword(password: string, v1: string, v2: string): Promise<string> {
