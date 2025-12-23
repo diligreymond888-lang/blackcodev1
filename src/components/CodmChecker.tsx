@@ -64,9 +64,11 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     notClean: string[];
     hasCodm: string[];
   }>({ valid: [], invalid: [], clean: [], notClean: [], hasCodm: [] });
+  const [isProcessing, setIsProcessing] = useState(false);
   const logIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const shouldStopRef = useRef(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -151,9 +153,15 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     addLog(`Switched to ${newMode === 'checker' ? 'CODM Checker' : 'Searcher Domain'} mode`, 'info');
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (mode === 'checker' && !file) {
       addLog('Please select a file first!', 'info');
+      toast.error('Please upload a file first!');
+      return;
+    }
+    if (mode === 'checker' && fileLines.length === 0) {
+      addLog('File is empty or still loading!', 'info');
+      toast.error('Please wait for file to load or select a valid file.');
       return;
     }
     if (mode === 'searcher' && !selectedDomain) {
@@ -161,15 +169,19 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       return;
     }
     
+    shouldStopRef.current = false;
     setIsRunning(true);
     setIsPaused(false);
+    setIsProcessing(true);
     addLog(`Starting ${mode === 'checker' ? 'checker' : 'searcher'}...`, 'info');
     
     if (mode === 'checker') {
-      processChecking();
+      await processChecking();
     } else {
       simulateSearching();
     }
+    
+    setIsProcessing(false);
   };
 
   const handlePause = () => {
@@ -178,8 +190,10 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   };
 
   const handleStop = () => {
+    shouldStopRef.current = true;
     setIsRunning(false);
     setIsPaused(false);
+    setIsProcessing(false);
     addLog('Stopped', 'info');
   };
 
@@ -259,7 +273,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     const maxRetries = 3;
     
     for (let i = 0; i < validLines.length; i += batchSize) {
-      if (!isRunning) {
+      if (shouldStopRef.current) {
         addLog('Checking stopped by user.', 'info');
         break;
       }
@@ -271,15 +285,20 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       let retryCount = 0;
       let success = false;
       
-      while (!success && retryCount < maxRetries) {
+      while (!success && retryCount < maxRetries && !shouldStopRef.current) {
         try {
-          addLog(`Checking batch ${batchNum}/${totalBatches}${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`, 'info');
+          addLog(`[BATCH ${batchNum}/${totalBatches}] Sending ${batch.length} accounts to API${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`, 'info');
+          
+          console.log('Calling codm-checker with batch:', batch);
           
           const { data, error } = await supabase.functions.invoke('codm-checker', {
             body: { accounts: batch }
           });
 
+          console.log('API Response:', { data, error });
+
           if (error) {
+            console.error('API Error:', error);
             // Check if it's a rate limit error
             if (error.message?.includes('429') || error.message?.includes('rate limit')) {
               const waitTime = 60; // Wait 60 seconds on rate limit
@@ -302,8 +321,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
           }
 
           success = true;
+          addLog(`[BATCH ${batchNum}] Received ${data?.results?.length || 0} results`, 'info');
 
-          if (data?.results) {
+          if (data?.results && Array.isArray(data.results)) {
             for (const result of data.results) {
               let logType: LogEntry['type'] = 'info';
               let statKey: keyof Stats | null = null;
@@ -382,7 +402,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       }
       
       // Delay between batches to respect rate limits
-      if (i + batchSize < validLines.length && isRunning) {
+      if (i + batchSize < validLines.length && !shouldStopRef.current) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
