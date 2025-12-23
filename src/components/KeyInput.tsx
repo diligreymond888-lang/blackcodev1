@@ -5,6 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 export interface KeyInfo {
   status: string;
   duration: string;
+  expiresAt: string | null;
+  isLifetime: boolean;
+  keyValue: string;
 }
 
 interface KeyInputProps {
@@ -14,7 +17,7 @@ interface KeyInputProps {
 const KeyInput = ({ onValidKey }: KeyInputProps) => {
   const [key, setKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
+  const [keyInfo, setKeyInfo] = useState<{ status: string; duration: string } | null>(null);
 
   const calculateDuration = (expiresAt: string | null, isLifetime: boolean): string => {
     if (isLifetime) {
@@ -57,12 +60,13 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
     setKeyInfo(null);
 
     try {
-      // Check if key exists and is valid
+      // Check if key exists and is valid (not used and active)
       const { data, error } = await supabase
         .from('access_keys')
         .select('*')
         .eq('key_value', key.trim())
         .eq('is_active', true)
+        .eq('is_used', false)
         .maybeSingle();
 
       if (error) {
@@ -72,8 +76,20 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
       }
 
       if (!data) {
-        toast.error('Invalid key');
-        setKeyInfo({ status: 'Invalid', duration: 'N/A' });
+        // Check if key exists but is already used
+        const { data: usedKey } = await supabase
+          .from('access_keys')
+          .select('is_used')
+          .eq('key_value', key.trim())
+          .maybeSingle();
+
+        if (usedKey?.is_used) {
+          toast.error('This key has already been used');
+          setKeyInfo({ status: 'Used', duration: 'N/A' });
+        } else {
+          toast.error('Invalid key');
+          setKeyInfo({ status: 'Invalid', duration: 'N/A' });
+        }
         return;
       }
 
@@ -87,11 +103,32 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
         }
       }
 
+      // Mark the key as used
+      const { error: updateError } = await supabase
+        .from('access_keys')
+        .update({ 
+          is_used: true, 
+          used_at: new Date().toISOString() 
+        })
+        .eq('id', data.id);
+
+      if (updateError) {
+        console.error('Error marking key as used:', updateError);
+        toast.error('Error activating key');
+        return;
+      }
+
       // Key is valid!
       const duration = calculateDuration(data.expires_at, data.is_lifetime);
-      const info = { status: 'Valid', duration };
-      setKeyInfo(info);
-      toast.success('Key validated successfully!');
+      const info: KeyInfo = { 
+        status: 'Valid', 
+        duration,
+        expiresAt: data.expires_at,
+        isLifetime: data.is_lifetime,
+        keyValue: data.key_value
+      };
+      setKeyInfo({ status: 'Valid', duration });
+      toast.success('Key activated successfully!');
       
       // Small delay to show the status before transitioning
       setTimeout(() => {

@@ -21,7 +21,9 @@ export type Database = {
           id: string
           is_active: boolean
           is_lifetime: boolean
+          is_used: boolean
           key_value: string
+          used_at: string | null
         }
         Insert: {
           created_at?: string
@@ -29,7 +31,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_lifetime?: boolean
+          is_used?: boolean
           key_value: string
+          used_at?: string | null
         }
         Update: {
           created_at?: string
@@ -37,7 +41,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_lifetime?: boolean
+          is_used?: boolean
           key_value?: string
+          used_at?: string | null
         }
         Relationships: []
       }
