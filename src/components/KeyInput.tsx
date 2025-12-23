@@ -134,24 +134,21 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
       </form>
 
       {keyInfo && (
-        <div className="neon-border rounded-lg p-4 bg-card/50 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Status</p>
-              <p className={`font-display font-bold text-lg ${
-                keyInfo.status === 'Valid' ? 'text-green-500' : 
-                keyInfo.status === 'Expired' ? 'text-yellow-500' : 'text-red-500'
-              }`}>
-                {keyInfo.status}
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Duration</p>
-              <p className="font-display font-bold text-lg text-foreground">
-                {keyInfo.duration}
-              </p>
-            </div>
+        <div className="flex items-center justify-center gap-4 text-sm animate-in fade-in duration-200">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${
+              keyInfo.status === 'Valid' ? 'bg-green-500' : 
+              keyInfo.status === 'Expired' ? 'bg-yellow-500' : 'bg-red-500'
+            }`} />
+            <span className={`font-medium ${
+              keyInfo.status === 'Valid' ? 'text-green-500' : 
+              keyInfo.status === 'Expired' ? 'text-yellow-500' : 'text-red-500'
+            }`}>
+              {keyInfo.status}
+            </span>
           </div>
+          <span className="text-muted-foreground">•</span>
+          <span className="text-muted-foreground">{keyInfo.duration}</span>
         </div>
       )}
     </div>
