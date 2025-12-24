@@ -164,10 +164,15 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     addLog('Ready...', 'info');
   };
 
+  // Description to add to all downloads
+  const getDownloadDescription = () => {
+    return `\n\n========================================\nModified by @BlackCodeHat\n\nTHANK YOU FOR USING\n========================================`;
+  };
+
   const handleDownload = () => {
     if (foundResults.length === 0) return;
     
-    const content = foundResults.join('\n');
+    const content = foundResults.join('\n') + getDownloadDescription();
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -184,7 +189,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     const results = checkerResults[category];
     if (results.length === 0) return;
     
-    const content = results.join('\n');
+    const content = results.join('\n') + getDownloadDescription();
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -755,7 +760,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const handleDownloadCleaned = () => {
     if (cleanedContent.length === 0) return;
     
-    const content = cleanedContent.join('\n');
+    const content = cleanedContent.join('\n') + getDownloadDescription();
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
