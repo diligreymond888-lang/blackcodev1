@@ -1,9 +1,9 @@
 const pricingData = [
-  { duration: '1 Day Access', price: '₱20' },
-  { duration: '3 Days Access', price: '₱50' },
-  { duration: '7 Days Access', price: '₱100' },
-  { duration: '15 Days Access', price: '₱150' },
-  { duration: 'Lifetime Access', price: '₱250' },
+  { duration: '1 Day Access', price: '₱40' },
+  { duration: '3 Days Access', price: '₱100' },
+  { duration: '7 Days Access', price: '₱200' },
+  { duration: '15 Days Access', price: '₱350' },
+  { duration: 'Lifetime Access', price: '₱450' },
 ];
 
 const PricingTable = () => {
