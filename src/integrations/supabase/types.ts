@@ -158,6 +158,8 @@ export type Database = {
         }
         Returns: undefined
       }
+      use_access_key: { Args: { p_key_id: string }; Returns: Json }
+      validate_access_key: { Args: { p_key_value: string }; Returns: Json }
     }
     Enums: {
       [_ in never]: never
