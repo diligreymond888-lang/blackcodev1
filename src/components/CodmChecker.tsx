@@ -1,11 +1,11 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield, Rocket, TrendingUp, Heart, Users, Eye, Share2 } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useAntiDDoSContext } from './AntiDDoSProvider';
 
-type Mode = 'checker' | 'searcher' | 'bomber';
+type Mode = 'checker' | 'searcher' | 'bomber' | 'booster';
 interface KeyInfo {
   status: string;
   duration: string;
@@ -36,6 +36,14 @@ interface BomberStats {
   iterations: number;
 }
 
+type BoostType = 'tiktok_views' | 'tiktok_likes' | 'tiktok_followers' | 'telegram_views' | 'facebook_shares';
+
+interface BoosterStats {
+  success: number;
+  fail: number;
+  total: number;
+}
+
 interface LogEntry {
   id: number;
   message: string;
@@ -52,6 +60,14 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const [selectedDomain, setSelectedDomain] = useState(true);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [bomberIterations, setBomberIterations] = useState(5);
+  // Booster state
+  const [boostUrl, setBoostUrl] = useState('');
+  const [selectedBoostType, setSelectedBoostType] = useState<BoostType>('tiktok_views');
+  const [boosterStats, setBoosterStats] = useState<BoosterStats>({
+    success: 0,
+    fail: 0,
+    total: 0,
+  });
   const [stats, setStats] = useState<Stats>({
     valid: 0,
     invalid: 0,
@@ -119,6 +135,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setStats({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
     setBomberStats({ success: 0, fail: 0, total: 0, iterations: 0 });
+    setBoosterStats({ success: 0, fail: 0, total: 0 });
     setLogs([]);
     setOutputFiles([]);
     setFoundResults([]);
@@ -128,6 +145,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const handleRefresh = () => {
     resetStats();
     setPhoneNumber('');
+    setBoostUrl('');
     addLog('Ready...', 'info');
   };
 
@@ -170,10 +188,12 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     resetStats();
     setFile(null);
     setPhoneNumber('');
+    setBoostUrl('');
     const modeNames = {
       checker: 'CODM Checker',
       searcher: 'Searcher Domain',
-      bomber: 'SMS Bomber'
+      bomber: 'SMS Bomber',
+      booster: 'Social Boost'
     };
     addLog(`Switched to ${modeNames[newMode]} mode`, 'info');
   };
@@ -205,6 +225,11 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       toast.error('Please enter a phone number!');
       return;
     }
+    if (mode === 'booster' && !boostUrl.trim()) {
+      addLog('Please enter a URL to boost!', 'info');
+      toast.error('Please enter a URL!');
+      return;
+    }
     
     shouldStopRef.current = false;
     setIsRunning(true);
@@ -214,7 +239,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     const modeNames = {
       checker: 'checker',
       searcher: 'searcher',
-      bomber: 'SMS bomber'
+      bomber: 'SMS bomber',
+      booster: 'social boost'
     };
     addLog(`Starting ${modeNames[mode]}...`, 'info');
     
@@ -224,6 +250,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       simulateSearching();
     } else if (mode === 'bomber') {
       await processBombing();
+    } else if (mode === 'booster') {
+      await processBoosting();
     }
     
     setIsProcessing(false);
@@ -557,6 +585,67 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     }
   };
 
+  const processBoosting = async () => {
+    if (!boostUrl.trim()) {
+      addLog('Please enter a URL to boost!', 'info');
+      toast.error('Please enter a URL!');
+      setIsRunning(false);
+      return;
+    }
+
+    const boostTypeLabels: Record<BoostType, string> = {
+      tiktok_views: 'TikTok Views',
+      tiktok_likes: 'TikTok Likes',
+      tiktok_followers: 'TikTok Followers',
+      telegram_views: 'Telegram Views',
+      facebook_shares: 'Facebook Shares',
+    };
+
+    addLog(`Boosting: ${boostTypeLabels[selectedBoostType]}`, 'info');
+    addLog(`URL: ${boostUrl}`, 'info');
+
+    try {
+      // Check rate limit
+      if (!checkRateLimitLocal()) {
+        addLog('Rate limited! Please wait...', 'info');
+        await new Promise(resolve => setTimeout(resolve, 30000));
+      }
+
+      addLog('Sending boost request...', 'info');
+
+      const { data, error } = await supabase.functions.invoke('social-boost', {
+        body: { action: selectedBoostType, url: boostUrl }
+      });
+
+      if (error) {
+        addLog(`Error: ${error.message}`, 'fail');
+        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
+        toast.error(`Boost failed: ${error.message}`);
+      } else if (data?.success) {
+        addLog(`✓ ${data.message}`, 'success');
+        if (data.orderId) {
+          addLog(`Order ID: ${data.orderId}`, 'info');
+        }
+        if (data.userInfo) {
+          addLog(`User: ${data.userInfo.nickname} (${data.userInfo.followers} followers)`, 'info');
+        }
+        setBoosterStats(prev => ({ ...prev, success: prev.success + 1, total: prev.total + 1 }));
+        toast.success(data.message);
+      } else {
+        addLog(`✗ ${data?.message || data?.error || 'Boost failed'}`, 'fail');
+        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
+        toast.error(data?.message || data?.error || 'Boost failed');
+      }
+
+      setIsRunning(false);
+      addLog('Boost request complete!', 'info');
+    } catch (err) {
+      addLog(`Error: ${err}`, 'fail');
+      setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
+      setIsRunning(false);
+    }
+  };
+
   const getLogColor = (type: LogEntry['type']) => {
     switch (type) {
       case 'valid': return 'text-green-400';
@@ -610,12 +699,20 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               <Zap className="w-4 h-4" />
               SMS Bomber
             </button>
+            <button
+              onClick={() => handleModeChange('booster')}
+              className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors flex items-center gap-2
+                ${mode === 'booster' ? 'bg-primary/20 text-primary' : 'text-foreground hover:bg-secondary/50'}`}
+            >
+              <Rocket className="w-4 h-4" />
+              Social Boost
+            </button>
           </div>
         )}
 
         {/* Title */}
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
-          {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : 'SMS Bomber'}
+          {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : mode === 'bomber' ? 'SMS Bomber' : 'Social Boost'}
         </h1>
         
         {/* Protection Status */}
@@ -753,6 +850,86 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               </button>
             </div>
           </div>
+        ) : mode === 'booster' ? (
+          <div className="space-y-4">
+            {/* URL Input */}
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-4">
+              <label className="text-muted-foreground text-xs font-medium block mb-2">URL to Boost</label>
+              <div className="flex items-center gap-3">
+                <TrendingUp className="w-5 h-5 text-primary shrink-0" />
+                <input
+                  type="text"
+                  value={boostUrl}
+                  onChange={(e) => setBoostUrl(e.target.value)}
+                  placeholder="https://tiktok.com/... or t.me/... or facebook.com/..."
+                  className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/60 focus:outline-none"
+                  disabled={isRunning}
+                />
+              </div>
+            </div>
+
+            {/* Boost Type Selector */}
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-4">
+              <label className="text-muted-foreground text-xs font-medium block mb-3">Boost Type</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {([
+                  { type: 'tiktok_views' as BoostType, label: 'TikTok Views', icon: Eye, color: 'text-pink-400' },
+                  { type: 'tiktok_likes' as BoostType, label: 'TikTok Likes', icon: Heart, color: 'text-red-400' },
+                  { type: 'tiktok_followers' as BoostType, label: 'TikTok Followers', icon: Users, color: 'text-blue-400' },
+                  { type: 'telegram_views' as BoostType, label: 'Telegram Views', icon: Eye, color: 'text-sky-400' },
+                  { type: 'facebook_shares' as BoostType, label: 'FB Shares', icon: Share2, color: 'text-blue-600' },
+                ]).map((boost) => (
+                  <button
+                    key={boost.type}
+                    onClick={() => setSelectedBoostType(boost.type)}
+                    disabled={isRunning}
+                    className={`py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5
+                      ${selectedBoostType === boost.type 
+                        ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30' 
+                        : 'bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground'
+                      } disabled:opacity-50`}
+                  >
+                    <boost.icon className={`w-3.5 h-3.5 ${selectedBoostType === boost.type ? '' : boost.color}`} />
+                    <span className="truncate">{boost.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Control Buttons */}
+            <div className="grid grid-cols-3 gap-2 pt-2">
+              <button
+                onClick={handleStart}
+                disabled={isRunning || !boostUrl.trim()}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Rocket className="w-4 h-4" />
+                Boost
+              </button>
+              <button
+                onClick={handleStop}
+                disabled={!isRunning}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Square className="w-4 h-4" />
+                Stop
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={isRunning}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reset
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {/* File Upload */}
@@ -842,6 +1019,22 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             >
               <p className="text-muted-foreground text-[10px] sm:text-xs font-medium mb-1">{stat.label}</p>
               <p className={`text-lg sm:text-xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      ) : mode === 'booster' ? (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Success', value: boosterStats.success, color: 'text-green-400' },
+            { label: 'Failed', value: boosterStats.fail, color: 'text-red-400' },
+            { label: 'Total', value: boosterStats.total, color: 'text-foreground' },
+          ].map((stat, index) => (
+            <div
+              key={index}
+              className="neon-border rounded-lg bg-card/30 backdrop-blur-sm p-3 sm:p-4 text-center"
+            >
+              <p className="text-muted-foreground text-xs font-medium mb-1">{stat.label}</p>
+              <p className={`text-xl sm:text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
             </div>
           ))}
         </div>
