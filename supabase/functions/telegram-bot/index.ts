@@ -223,9 +223,35 @@ async function sendTelegramMessage(chatId: string | number, text: string, parseM
   return response.json();
 }
 
-async function handleCommand(chatId: number, text: string, userId: number) {
+// Check if user is admin (from database or env)
+async function isAdmin(userId: number): Promise<boolean> {
+  const userIdStr = userId.toString();
+  
+  // First check if it's the primary admin from env
+  if (userIdStr === TELEGRAM_ADMIN_ID) {
+    return true;
+  }
+  
+  // Check database for additional admins
+  const { data: adminUser } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("telegram_id", userIdStr)
+    .eq("is_active", true)
+    .single();
+  
+  return !!adminUser;
+}
+
+// Check if user is the primary admin (owner)
+function isPrimaryAdmin(userId: number): boolean {
+  return userId.toString() === TELEGRAM_ADMIN_ID;
+}
+
+async function handleCommand(chatId: number, text: string, userId: number, username?: string) {
   // Check if user is admin
-  if (userId.toString() !== TELEGRAM_ADMIN_ID) {
+  const adminStatus = await isAdmin(userId);
+  if (!adminStatus) {
     await sendTelegramMessage(chatId, "❌ You are not authorized to use this bot.");
     return;
   }
@@ -238,9 +264,7 @@ async function handleCommand(chatId: number, text: string, userId: number) {
   switch (command) {
     case "/start":
     case "/help":
-      await sendTelegramMessage(
-        chatId,
-        `🔑 <b>Website Manager Bot</b>\n\n` +
+      let helpMsg = `🔑 <b>Website Manager Bot</b>\n\n` +
         `<b>📋 Key Management:</b>\n` +
         `/keys - List all keys\n` +
         `/addkey [key] [days] - Add key (0=lifetime)\n` +
@@ -275,8 +299,179 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `/live - Real-time traffic summary\n` +
         `/threats - Active threat analysis\n` +
         `/recentlogs [count] - Recent requests\n` +
-        `/blockedlogs [count] - Blocked requests`
-      );
+        `/blockedlogs [count] - Blocked requests`;
+      
+      // Add admin commands only for primary admin
+      if (isPrimaryAdmin(userId)) {
+        helpMsg += `\n\n<b>👑 Admin Management (Owner Only):</b>\n` +
+          `/admins - List all admins\n` +
+          `/addadmin [telegram_id] - Add admin\n` +
+          `/removeadmin [telegram_id] - Remove admin\n` +
+          `/admininfo [telegram_id] - View admin info`;
+      }
+      
+      await sendTelegramMessage(chatId, helpMsg);
+      break;
+    
+    // ===== ADMIN MANAGEMENT (Owner Only) =====
+    case "/admins":
+      if (!isPrimaryAdmin(userId)) {
+        await sendTelegramMessage(chatId, "❌ Only the primary admin can manage admins.");
+        return;
+      }
+      
+      const { data: admins, error: adminsError } = await supabase
+        .from("admin_users")
+        .select("*")
+        .order("created_at", { ascending: false });
+      
+      if (adminsError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${adminsError.message}`);
+        return;
+      }
+      
+      let adminListMsg = `👑 <b>Admin Users</b>\n\n`;
+      adminListMsg += `🌟 <b>Primary Admin:</b> <code>${TELEGRAM_ADMIN_ID}</code> (Owner)\n\n`;
+      
+      if (!admins || admins.length === 0) {
+        adminListMsg += `📭 No additional admins.`;
+      } else {
+        adminListMsg += `<b>Additional Admins (${admins.length}):</b>\n`;
+        for (const admin of admins) {
+          const status = admin.is_active ? "✅" : "❌";
+          const usernameStr = admin.username ? `@${admin.username}` : "No username";
+          const addedDate = new Date(admin.created_at).toLocaleDateString();
+          adminListMsg += `${status} <code>${admin.telegram_id}</code> | ${usernameStr} | ${addedDate}\n`;
+        }
+      }
+      await sendTelegramMessage(chatId, adminListMsg);
+      break;
+    
+    case "/addadmin":
+      if (!isPrimaryAdmin(userId)) {
+        await sendTelegramMessage(chatId, "❌ Only the primary admin can add admins.");
+        return;
+      }
+      
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /addadmin [telegram_id] [username]\nExample: /addadmin 123456789 johndoe");
+        return;
+      }
+      
+      const newAdminId = parts[1];
+      const newAdminUsername = parts[2] || null;
+      
+      // Check if it's the primary admin ID
+      if (newAdminId === TELEGRAM_ADMIN_ID) {
+        await sendTelegramMessage(chatId, "❌ Primary admin is already set in environment.");
+        return;
+      }
+      
+      // Check if admin already exists
+      const { data: existingAdmin } = await supabase
+        .from("admin_users")
+        .select("id")
+        .eq("telegram_id", newAdminId)
+        .single();
+      
+      if (existingAdmin) {
+        await sendTelegramMessage(chatId, `❌ Admin <code>${newAdminId}</code> already exists!`);
+        return;
+      }
+      
+      const { error: addAdminError } = await supabase.from("admin_users").insert({
+        telegram_id: newAdminId,
+        username: newAdminUsername,
+        added_by: userId.toString(),
+        is_active: true,
+      });
+      
+      if (addAdminError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${addAdminError.message}`);
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          `✅ Admin added!\n\n👤 ID: <code>${newAdminId}</code>\n${newAdminUsername ? `📛 Username: @${newAdminUsername}` : ""}`
+        );
+      }
+      break;
+    
+    case "/removeadmin":
+      if (!isPrimaryAdmin(userId)) {
+        await sendTelegramMessage(chatId, "❌ Only the primary admin can remove admins.");
+        return;
+      }
+      
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /removeadmin [telegram_id]");
+        return;
+      }
+      
+      const adminToRemove = parts[1];
+      
+      const { data: removedAdmin, error: removeAdminError } = await supabase
+        .from("admin_users")
+        .delete()
+        .eq("telegram_id", adminToRemove)
+        .select()
+        .single();
+      
+      if (removeAdminError || !removedAdmin) {
+        await sendTelegramMessage(chatId, `❌ Admin not found or error: ${removeAdminError?.message || "Not found"}`);
+      } else {
+        await sendTelegramMessage(chatId, `✅ Removed admin: <code>${adminToRemove}</code>`);
+      }
+      break;
+    
+    case "/admininfo":
+      if (!isPrimaryAdmin(userId)) {
+        await sendTelegramMessage(chatId, "❌ Only the primary admin can view admin info.");
+        return;
+      }
+      
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /admininfo [telegram_id]");
+        return;
+      }
+      
+      const adminToFind = parts[1];
+      
+      // Check if it's the primary admin
+      if (adminToFind === TELEGRAM_ADMIN_ID) {
+        await sendTelegramMessage(
+          chatId,
+          `👑 <b>Primary Admin (Owner)</b>\n\n` +
+          `🆔 ID: <code>${TELEGRAM_ADMIN_ID}</code>\n` +
+          `📌 Status: ✅ Active (Environment)\n` +
+          `🛡️ Permissions: Full Access`
+        );
+        return;
+      }
+      
+      const { data: foundAdmin, error: findAdminError } = await supabase
+        .from("admin_users")
+        .select("*")
+        .eq("telegram_id", adminToFind)
+        .single();
+      
+      if (findAdminError || !foundAdmin) {
+        await sendTelegramMessage(chatId, `❌ Admin not found`);
+      } else {
+        const status = foundAdmin.is_active ? "✅ Active" : "❌ Inactive";
+        const usernameStr = foundAdmin.username ? `@${foundAdmin.username}` : "Not set";
+        const created = new Date(foundAdmin.created_at).toLocaleString();
+        const addedBy = foundAdmin.added_by || "Unknown";
+        
+        await sendTelegramMessage(
+          chatId,
+          `👤 <b>Admin Details</b>\n\n` +
+          `🆔 ID: <code>${foundAdmin.telegram_id}</code>\n` +
+          `📛 Username: ${usernameStr}\n` +
+          `📌 Status: ${status}\n` +
+          `➕ Added By: <code>${addedBy}</code>\n` +
+          `🕐 Created: ${created}`
+        );
+      }
       break;
 
     case "/keys":
@@ -1133,8 +1328,9 @@ serve(async (req) => {
       const chatId = update.message.chat.id;
       const msgText = update.message.text || "";
       const userId = update.message.from.id;
+      const username = update.message.from.username;
 
-      await handleCommand(chatId, msgText, userId);
+      await handleCommand(chatId, msgText, userId, username);
     }
 
     return new Response(JSON.stringify({ ok: true }), {

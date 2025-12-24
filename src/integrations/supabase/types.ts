@@ -47,6 +47,33 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_users: {
+        Row: {
+          added_by: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          telegram_id: string
+          username: string | null
+        }
+        Insert: {
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          telegram_id: string
+          username?: string | null
+        }
+        Update: {
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          telegram_id?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
       blocked_clients: {
         Row: {
           blocked_at: string
