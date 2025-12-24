@@ -632,19 +632,24 @@ function validateAccountInput(accounts: unknown): ValidationResult {
     
     const parts = line.split(':');
     if (parts.length < 2) {
-      errors.push(`Account ${i + 1}: invalid format (use email:password)`);
+      errors.push(`Account ${i + 1}: invalid format (use account:password)`);
       continue;
     }
     
-    const email = parts[0].trim();
-    if (email.length < 3 || email.length > 100) {
-      errors.push(`Account ${i + 1}: invalid email length`);
+    const account = parts[0].trim();
+    if (account.length < 3 || account.length > 100) {
+      errors.push(`Account ${i + 1}: invalid account/email length`);
       continue;
     }
     
-    // Basic email format check
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.push(`Account ${i + 1}: invalid email format`);
+    // Allow both username and email format (Garena supports both)
+    // Username: alphanumeric with some special chars, no spaces
+    // Email: standard email format
+    const isValidUsername = /^[a-zA-Z0-9._-]+$/.test(account);
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account);
+    
+    if (!isValidUsername && !isValidEmail) {
+      errors.push(`Account ${i + 1}: invalid account format (use username or email)`);
       continue;
     }
     
