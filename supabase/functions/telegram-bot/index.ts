@@ -209,6 +209,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Log cleanup configuration
+const LOG_RETENTION_DAYS = 30;
+let lastCleanupTime = 0;
+const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
+// Background log cleanup function
+async function cleanupOldLogs(): Promise<{ deleted: number; error?: string }> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - LOG_RETENTION_DAYS);
+    
+    const { data, error } = await supabase
+      .from("request_logs")
+      .delete()
+      .lt("created_at", cutoffDate.toISOString())
+      .select("id");
+    
+    if (error) {
+      console.error("[LOG_CLEANUP] Error:", error.message);
+      return { deleted: 0, error: error.message };
+    }
+    
+    const count = data?.length || 0;
+    console.log(`[LOG_CLEANUP] Deleted ${count} logs older than ${LOG_RETENTION_DAYS} days`);
+    return { deleted: count };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[LOG_CLEANUP] Exception:", msg);
+    return { deleted: 0, error: msg };
+  }
+}
+
+// Check and run cleanup if needed (called on each request)
+async function maybeRunCleanup(): Promise<void> {
+  const now = Date.now();
+  if (now - lastCleanupTime > CLEANUP_INTERVAL) {
+    lastCleanupTime = now;
+    // Run cleanup - fire and forget
+    cleanupOldLogs().catch(e => console.error("[LOG_CLEANUP] Background error:", e));
+  }
+}
+
 async function sendTelegramMessage(chatId: string | number, text: string, parseMode = "HTML") {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const response = await fetch(url, {
@@ -299,7 +341,10 @@ async function handleCommand(chatId: number, text: string, userId: number, usern
         `/live - Real-time traffic summary\n` +
         `/threats - Active threat analysis\n` +
         `/recentlogs [count] - Recent requests\n` +
-        `/blockedlogs [count] - Blocked requests`;
+        `/blockedlogs [count] - Blocked requests\n\n` +
+        `<b>🧹 Log Management:</b>\n` +
+        `/cleanlogs - Clean old logs (30+ days)\n` +
+        `/logstats - View log statistics`;
       
       // Add admin commands only for primary admin
       if (isPrimaryAdmin(userId)) {
@@ -1276,12 +1321,74 @@ async function handleCommand(chatId: number, text: string, userId: number, usern
       }
       break;
 
+    // ===== LOG MANAGEMENT =====
+    case "/cleanlogs":
+      await sendTelegramMessage(chatId, "🔄 Running log cleanup...");
+      const cleanupResult = await cleanupOldLogs();
+      if (cleanupResult.error) {
+        await sendTelegramMessage(chatId, `❌ Cleanup error: ${cleanupResult.error}`);
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          `🧹 <b>Log Cleanup Complete</b>\n\n` +
+          `📊 Deleted: <b>${cleanupResult.deleted}</b> logs\n` +
+          `⏱ Retention: ${LOG_RETENTION_DAYS} days\n` +
+          `✅ Cleanup successful!`
+        );
+      }
+      break;
+    
+    case "/logstats":
+      const logStatsNow = new Date();
+      const thirtyDaysAgo = new Date(logStatsNow.getTime() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(logStatsNow.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const oneDayAgo = new Date(logStatsNow.getTime() - 24 * 60 * 60 * 1000);
+      
+      const { count: totalLogs } = await supabase
+        .from("request_logs")
+        .select("*", { count: "exact", head: true });
+      
+      const { count: oldLogs } = await supabase
+        .from("request_logs")
+        .select("*", { count: "exact", head: true })
+        .lt("created_at", thirtyDaysAgo.toISOString());
+      
+      const { count: weekLogs } = await supabase
+        .from("request_logs")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", sevenDaysAgo.toISOString());
+      
+      const { count: dayLogs } = await supabase
+        .from("request_logs")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", oneDayAgo.toISOString());
+      
+      const { count: blockedTotal } = await supabase
+        .from("request_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("was_blocked", true);
+      
+      await sendTelegramMessage(
+        chatId,
+        `📊 <b>Log Statistics</b>\n\n` +
+        `📁 Total logs: <b>${totalLogs || 0}</b>\n` +
+        `🗓 Last 24h: <b>${dayLogs || 0}</b>\n` +
+        `📅 Last 7 days: <b>${weekLogs || 0}</b>\n` +
+        `🚫 Blocked requests: <b>${blockedTotal || 0}</b>\n\n` +
+        `⚠️ Logs older than ${LOG_RETENTION_DAYS} days: <b>${oldLogs || 0}</b>\n` +
+        `💡 Use /cleanlogs to remove old logs`
+      );
+      break;
+
     default:
       await sendTelegramMessage(chatId, "❓ Unknown command. Use /help for commands.");
   }
 }
 
 serve(async (req) => {
+  // Trigger background cleanup check on each request
+  maybeRunCleanup();
+  
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
