@@ -683,13 +683,14 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       return;
     }
 
-    // URL regex pattern to match various URL formats
-    const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\/[^\s]*)?/gi;
+    // Comprehensive URL regex pattern - matches http, https, www, and common domains
+    const urlPattern = /(?:https?:\/\/|www\.)[^\s<>"{}|\\^`[\]]+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|io|co|me|app|dev|xyz|info|biz|gov|edu|mil|int|pro|name|museum|aero|jobs|mobi|tel|travel|asia|cat|coop|ly|gg|tv|fm|cc|us|uk|ca|au|de|fr|es|it|nl|ru|cn|jp|kr|in|br|mx|za|ng|ke|eg|ph|id|my|sg|hk|tw|vn|th|pk|bd|lk|np|ae|sa|qa|kw|bh|om|jo|lb|sy|iq|ir|il|tr|ua|pl|cz|sk|hu|ro|bg|hr|rs|si|ba|mk|al|me|gr|cy|mt|pt|be|ch|at|se|no|dk|fi|is|ie|lu|li|mc|ad|sm|va|ee|lv|lt|by|md|am|ge|az|kz|uz|tm|kg|tj|mn|af)(?:\/[^\s<>"{}|\\^`[\]]*)?/gi;
     
     const cleanedLines: string[] = [];
     let totalUrlsRemoved = 0;
+    let linesWithUrls = 0;
     
-    addLog(`Processing ${fileLines.length} lines...`, 'info');
+    addLog(`Scanning ${fileLines.length} lines for URLs...`, 'info');
     setRemoverStats(prev => ({ ...prev, totalLines: fileLines.length }));
 
     let lineIndex = 0;
@@ -698,9 +699,12 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       if (shouldStopRef.current || lineIndex >= fileLines.length) {
         setIsRunning(false);
         setCleanedContent(cleanedLines);
-        setOutputFiles([`cleaned_${Date.now()}.txt`]);
-        addLog(`Complete! Removed ${totalUrlsRemoved} URLs from ${fileLines.length} lines.`, 'success');
-        toast.success(`Removed ${totalUrlsRemoved} URLs!`);
+        if (cleanedLines.length > 0) {
+          setOutputFiles([`cleaned_${Date.now()}.txt`]);
+        }
+        addLog(`Complete! Found ${linesWithUrls} lines with URLs.`, 'info');
+        addLog(`Removed ${totalUrlsRemoved} URLs total. ${cleanedLines.length} clean lines saved.`, 'success');
+        toast.success(`Removed ${totalUrlsRemoved} URLs from ${linesWithUrls} lines!`);
         return;
       }
 
@@ -708,17 +712,30 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       const urlMatches = line.match(urlPattern) || [];
       const urlCount = urlMatches.length;
       
-      // Remove all URLs from the line
-      const cleanedLine = line.replace(urlPattern, '').replace(/\s+/g, ' ').trim();
-      
       if (urlCount > 0) {
-        addLog(`[${lineIndex + 1}/${fileLines.length}] Removed ${urlCount} URL(s): ${urlMatches.slice(0, 2).join(', ')}${urlCount > 2 ? '...' : ''}`, 'success');
+        // Line has URLs - remove them
+        linesWithUrls++;
+        const cleanedLine = line.replace(urlPattern, '').replace(/\s+/g, ' ').trim();
+        
+        // Log each URL found
+        urlMatches.forEach((url, i) => {
+          addLog(`[Line ${lineIndex + 1}] Removed: ${url.substring(0, 50)}${url.length > 50 ? '...' : ''}`, 'success');
+        });
+        
         totalUrlsRemoved += urlCount;
-      }
-      
-      // Only add non-empty cleaned lines
-      if (cleanedLine) {
-        cleanedLines.push(cleanedLine);
+        
+        // Only add non-empty cleaned lines
+        if (cleanedLine) {
+          cleanedLines.push(cleanedLine);
+          addLog(`[Line ${lineIndex + 1}] Kept: "${cleanedLine.substring(0, 60)}${cleanedLine.length > 60 ? '...' : ''}"`, 'info');
+        } else {
+          addLog(`[Line ${lineIndex + 1}] Line was only URL(s) - removed entirely`, 'info');
+        }
+      } else {
+        // Line has no URLs - keep it as is
+        if (line.trim()) {
+          cleanedLines.push(line);
+        }
       }
       
       setRemoverStats({
@@ -728,7 +745,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       });
       
       lineIndex++;
-      setTimeout(processLine, 50);
+      // Faster processing for lines without URLs
+      setTimeout(processLine, urlCount > 0 ? 100 : 10);
     };
 
     processLine();
