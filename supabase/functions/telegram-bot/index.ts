@@ -251,6 +251,12 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `/findkey [key] - Find key details\n` +
         `/expiredkeys - List expired keys\n` +
         `/cleanexpired - Delete expired keys\n\n` +
+        `<b>📢 Broadcast:</b>\n` +
+        `/broadcast [title] | [message] - Add broadcast\n` +
+        `/broadcasts - List all broadcasts\n` +
+        `/removebroadcast [id] - Remove broadcast\n` +
+        `/clearbroadcasts - Clear all broadcasts\n` +
+        `/urgentbroadcast [title] | [msg] - Urgent broadcast\n\n` +
         `<b>🚀 Social Boost:</b>\n` +
         `/ttviews [url] - TikTok Views\n` +
         `/ttlikes [url] - TikTok Likes\n` +
@@ -949,6 +955,130 @@ async function handleCommand(chatId: number, text: string, userId: number) {
       await sendTelegramMessage(chatId, "⏳ Processing Facebook Shares boost...");
       const fbSharesResult = await executeFacebookBoost(fbSharesUrl);
       await sendTelegramMessage(chatId, fbSharesResult);
+      break;
+
+    // Broadcast Commands
+    case "/broadcast":
+      const broadcastContent = parts.slice(1).join(" ");
+      if (!broadcastContent || !broadcastContent.includes("|")) {
+        await sendTelegramMessage(chatId, "❌ Usage: /broadcast [title] | [message]\nExample: /broadcast Maintenance | Server will restart at 10PM");
+        return;
+      }
+      const [bcTitle, ...bcMsgParts] = broadcastContent.split("|");
+      const bcMessage = bcMsgParts.join("|").trim();
+      
+      if (!bcTitle.trim() || !bcMessage) {
+        await sendTelegramMessage(chatId, "❌ Both title and message are required.");
+        return;
+      }
+
+      const { error: bcAddError } = await supabase.from("broadcasts").insert({
+        title: bcTitle.trim(),
+        message: bcMessage,
+        priority: "normal",
+        created_by: userId.toString(),
+      });
+
+      if (bcAddError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${bcAddError.message}`);
+      } else {
+        await sendTelegramMessage(chatId, `✅ Broadcast added!\n\n📢 <b>${bcTitle.trim()}</b>\n${bcMessage}`);
+      }
+      break;
+
+    case "/urgentbroadcast":
+      const urgentContent = parts.slice(1).join(" ");
+      if (!urgentContent || !urgentContent.includes("|")) {
+        await sendTelegramMessage(chatId, "❌ Usage: /urgentbroadcast [title] | [message]");
+        return;
+      }
+      const [urgentTitle, ...urgentMsgParts] = urgentContent.split("|");
+      const urgentMsg = urgentMsgParts.join("|").trim();
+      
+      if (!urgentTitle.trim() || !urgentMsg) {
+        await sendTelegramMessage(chatId, "❌ Both title and message are required.");
+        return;
+      }
+
+      const { error: urgentAddError } = await supabase.from("broadcasts").insert({
+        title: urgentTitle.trim(),
+        message: urgentMsg,
+        priority: "urgent",
+        created_by: userId.toString(),
+      });
+
+      if (urgentAddError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${urgentAddError.message}`);
+      } else {
+        await sendTelegramMessage(chatId, `🚨 Urgent Broadcast added!\n\n⚠️ <b>${urgentTitle.trim()}</b>\n${urgentMsg}`);
+      }
+      break;
+
+    case "/broadcasts":
+      const { data: allBroadcasts, error: bcListError } = await supabase
+        .from("broadcasts")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(15);
+
+      if (bcListError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${bcListError.message}`);
+        return;
+      }
+
+      if (!allBroadcasts || allBroadcasts.length === 0) {
+        await sendTelegramMessage(chatId, "📭 No broadcasts found.");
+        return;
+      }
+
+      let bcListMsg = `📢 <b>Broadcasts (${allBroadcasts.length}):</b>\n\n`;
+      for (const bc of allBroadcasts) {
+        const priority = bc.priority === "urgent" ? "🚨" : bc.priority === "high" ? "⚠️" : "📢";
+        const status = bc.is_active ? "✅" : "❌";
+        const date = new Date(bc.created_at).toLocaleDateString();
+        const shortId = bc.id.substring(0, 8);
+        bcListMsg += `${priority}${status} <b>${bc.title}</b>\n`;
+        bcListMsg += `   ID: <code>${shortId}</code> | ${date}\n`;
+        bcListMsg += `   ${bc.message.substring(0, 50)}${bc.message.length > 50 ? "..." : ""}\n\n`;
+      }
+      await sendTelegramMessage(chatId, bcListMsg);
+      break;
+
+    case "/removebroadcast":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /removebroadcast [id]\nUse short ID from /broadcasts");
+        return;
+      }
+      const bcIdToRemove = parts[1];
+
+      const { data: removedBc, error: bcRemoveError } = await supabase
+        .from("broadcasts")
+        .delete()
+        .ilike("id", `${bcIdToRemove}%`)
+        .select();
+
+      if (bcRemoveError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${bcRemoveError.message}`);
+      } else if (!removedBc || removedBc.length === 0) {
+        await sendTelegramMessage(chatId, `❌ Broadcast not found`);
+      } else {
+        await sendTelegramMessage(chatId, `✅ Removed broadcast: <b>${removedBc[0].title}</b>`);
+      }
+      break;
+
+    case "/clearbroadcasts":
+      const { data: clearedBc, error: bcClearError } = await supabase
+        .from("broadcasts")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select();
+
+      if (bcClearError) {
+        await sendTelegramMessage(chatId, `❌ Error: ${bcClearError.message}`);
+      } else {
+        const count = clearedBc?.length || 0;
+        await sendTelegramMessage(chatId, `🧹 Cleared ${count} broadcast(s)`);
+      }
       break;
 
     default:
