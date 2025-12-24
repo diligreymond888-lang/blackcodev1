@@ -6,6 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-client-id',
 };
 
+// Hash sensitive data for privacy
+async function hashSensitiveData(data: string): Promise<string> {
+  if (data === 'unknown') return 'unknown';
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -48,12 +58,16 @@ serve(async (req) => {
         });
       }
 
-      // Log the request
+      // Hash IP and user agent before logging for privacy
+      const ipHash = await hashSensitiveData(ipAddress);
+      const uaHash = await hashSensitiveData(userAgent);
+
+      // Log the request with hashed data
       await supabase.rpc('log_request', {
         p_client_id: clientId,
         p_endpoint: endpoint,
-        p_ip_address: ipAddress,
-        p_user_agent: userAgent,
+        p_ip_address: ipHash,
+        p_user_agent: uaHash,
         p_was_blocked: !rateLimitResult?.allowed
       });
 
