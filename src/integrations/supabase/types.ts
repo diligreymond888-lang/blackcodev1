@@ -47,12 +47,117 @@ export type Database = {
         }
         Relationships: []
       }
+      blocked_clients: {
+        Row: {
+          blocked_at: string
+          client_id: string
+          expires_at: string
+          id: string
+          is_active: boolean
+          reason: string
+          request_count: number
+        }
+        Insert: {
+          blocked_at?: string
+          client_id: string
+          expires_at: string
+          id?: string
+          is_active?: boolean
+          reason?: string
+          request_count?: number
+        }
+        Update: {
+          blocked_at?: string
+          client_id?: string
+          expires_at?: string
+          id?: string
+          is_active?: boolean
+          reason?: string
+          request_count?: number
+        }
+        Relationships: []
+      }
+      rate_limits: {
+        Row: {
+          client_id: string
+          created_at: string
+          endpoint: string
+          id: string
+          request_count: number
+          window_start: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          request_count?: number
+          window_start?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          request_count?: number
+          window_start?: string
+        }
+        Relationships: []
+      }
+      request_logs: {
+        Row: {
+          client_id: string
+          created_at: string
+          endpoint: string
+          id: string
+          ip_address: string | null
+          user_agent: string | null
+          was_blocked: boolean
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          ip_address?: string | null
+          user_agent?: string | null
+          was_blocked?: boolean
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          ip_address?: string | null
+          user_agent?: string | null
+          was_blocked?: boolean
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      check_rate_limit: {
+        Args: {
+          p_client_id: string
+          p_endpoint: string
+          p_max_requests?: number
+          p_window_seconds?: number
+        }
+        Returns: Json
+      }
+      log_request: {
+        Args: {
+          p_client_id: string
+          p_endpoint: string
+          p_ip_address?: string
+          p_user_agent?: string
+          p_was_blocked?: boolean
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

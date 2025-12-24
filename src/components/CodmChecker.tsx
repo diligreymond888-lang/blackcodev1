@@ -43,7 +43,7 @@ interface LogEntry {
 }
 
 const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
-  const { checkRateLimit, remainingRequests, isBlocked } = useAntiDDoSContext();
+  const { checkRateLimitLocal, remainingRequests, isBlocked, stats: protectionStats } = useAntiDDoSContext();
   const [mode, setMode] = useState<Mode>('checker');
   const [menuOpen, setMenuOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -179,8 +179,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   };
 
   const handleStart = async () => {
-    // Check rate limit before starting
-    if (!checkRateLimit()) {
+    // Check rate limit before starting (use local for fast check)
+    if (!checkRateLimitLocal()) {
       addLog('Rate limit exceeded! Please wait before making more requests.', 'info');
       toast.error('Rate limit exceeded! Please wait before trying again.');
       return;
@@ -330,7 +330,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       
       while (!success && retryCount < maxRetries && !shouldStopRef.current) {
         // Check rate limit before each request
-        if (!checkRateLimit()) {
+        if (!checkRateLimitLocal()) {
           addLog('Rate limited! Waiting 30 seconds...', 'info');
           await new Promise(resolve => setTimeout(resolve, 30000));
           continue;
@@ -509,7 +509,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         }
 
         // Check rate limit before each iteration
-        if (!checkRateLimit()) {
+        if (!checkRateLimitLocal()) {
           addLog('Rate limited! Waiting 30 seconds...', 'info');
           await new Promise(resolve => setTimeout(resolve, 30000));
           continue;
