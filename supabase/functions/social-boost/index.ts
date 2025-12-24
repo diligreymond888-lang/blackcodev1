@@ -101,7 +101,7 @@ async function checkVideoId(tiktokUrl: string): Promise<{ success: boolean; vide
 }
 
 // Check service availability for video
-async function checkVideoServiceAvailability(videoId: string, serviceId: number, deviceId: string): Promise<boolean> {
+async function checkVideoServiceAvailability(videoId: string, serviceId: number, deviceId: string): Promise<{ allowed: boolean; message?: string; timeLeft?: number }> {
   console.log(`[Step 2] Checking service availability for video ${videoId}`);
   
   try {
@@ -121,12 +121,17 @@ async function checkVideoServiceAvailability(videoId: string, serviceId: number,
     console.log("checkVideoServiceAvailability response:", JSON.stringify(result));
     
     if (result.success || result.status === 'success') {
-      return result.data?.allowed || result.available || false;
+      const allowed = result.data?.allowed || result.available || false;
+      return { allowed, message: result.message || result.data?.message };
     }
-    return false;
+    
+    // Return the actual message from the API
+    const message = result.message || result.data?.message || "Service not available";
+    const timeLeft = result.data?.timeLeft;
+    return { allowed: false, message, timeLeft };
   } catch (error) {
     console.error("Error checking service availability:", error);
-    return false;
+    return { allowed: false, message: String(error) };
   }
 }
 
@@ -195,7 +200,7 @@ async function checkUsernameProxy(username: string): Promise<{ success: boolean;
 }
 
 // Check account service availability
-async function checkAccountServiceAvailability(username: string, serviceId: number, deviceId: string): Promise<boolean> {
+async function checkAccountServiceAvailability(username: string, serviceId: number, deviceId: string): Promise<{ allowed: boolean; message?: string; timeLeft?: number }> {
   console.log(`[Step 2] Checking service availability for account ${username}`);
   
   try {
@@ -215,12 +220,53 @@ async function checkAccountServiceAvailability(username: string, serviceId: numb
     console.log("checkAccountServiceAvailability response:", JSON.stringify(result));
     
     if (result.success || result.status === 'success') {
-      return result.data?.allowed || result.available || false;
+      const allowed = result.data?.allowed || result.available || false;
+      return { allowed, message: result.message || result.data?.message };
     }
-    return false;
+    
+    // Return actual message from API (includes cooldown info)
+    const message = result.message || result.data?.message || "Service not available";
+    const timeLeft = result.data?.timeLeft;
+    return { allowed: false, message, timeLeft };
   } catch (error) {
     console.error("Error checking account service:", error);
-    return false;
+    return { allowed: false, message: String(error) };
+  }
+}
+
+// Check generic service availability
+async function checkGenericServiceAvailability(serviceId: number, deviceId: string, username?: string): Promise<{ allowed: boolean; message?: string; timeLeft?: number }> {
+  console.log(`[Step 1] Checking service availability for service ${serviceId}`);
+  
+  try {
+    const params: Record<string, string> = {
+      action: "check",
+      device: deviceId,
+      service: serviceId.toString(),
+    };
+    if (username) params.username = username;
+    
+    const searchParams = new URLSearchParams(params);
+    
+    const response = await fetch(`${BASE_URL}?${searchParams.toString()}`, {
+      method: "GET",
+      headers: HEADERS,
+    });
+    
+    const result = await response.json();
+    console.log("checkGenericServiceAvailability response:", JSON.stringify(result));
+    
+    if (result.success || result.status === 'success') {
+      const allowed = result.data?.allowed || result.available || false;
+      return { allowed, message: result.message || result.data?.message };
+    }
+    
+    const message = result.message || result.data?.message || "Service not available";
+    const timeLeft = result.data?.timeLeft;
+    return { allowed: false, message, timeLeft };
+  } catch (error) {
+    console.error("Error checking service:", error);
+    return { allowed: false, message: String(error) };
   }
 }
 
@@ -252,38 +298,6 @@ async function placeAccountOrder(tiktokUrl: string, username: string, serviceId:
   } catch (error) {
     console.error("Error placing account order:", error);
     return { success: false, error: String(error) };
-  }
-}
-
-// Check Telegram/Facebook service availability
-async function checkGenericServiceAvailability(serviceId: number, deviceId: string, username?: string): Promise<boolean> {
-  console.log(`[Step 1] Checking service availability for service ${serviceId}`);
-  
-  try {
-    const params: Record<string, string> = {
-      action: "check",
-      device: deviceId,
-      service: serviceId.toString(),
-    };
-    if (username) params.username = username;
-    
-    const searchParams = new URLSearchParams(params);
-    
-    const response = await fetch(`${BASE_URL}?${searchParams.toString()}`, {
-      method: "GET",
-      headers: HEADERS,
-    });
-    
-    const result = await response.json();
-    console.log("checkGenericServiceAvailability response:", JSON.stringify(result));
-    
-    if (result.success || result.status === 'success') {
-      return result.data?.allowed || result.available || false;
-    }
-    return false;
-  } catch (error) {
-    console.error("Error checking service:", error);
-    return false;
   }
 }
 
@@ -319,29 +333,39 @@ async function placeGenericOrder(url: string, serviceId: number, deviceId: strin
   }
 }
 
-// Main boost functions
+// Main boost functions - Helper to format time
+function formatTimeLeft(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
 async function boostTikTokViews(tiktokUrl: string): Promise<{ success: boolean; message: string; orderId?: string }> {
   const deviceId = generateDeviceId();
   
   // Step 1: Check video ID
   const videoCheck = await checkVideoId(tiktokUrl);
   if (!videoCheck.success || !videoCheck.videoId) {
-    return { success: false, message: `Step 1 Failed: ${videoCheck.error}` };
+    return { success: false, message: `Video check failed: ${videoCheck.error}` };
   }
   
   // Step 2: Check service availability
-  const available = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_VIEWS, deviceId);
-  if (!available) {
-    return { success: false, message: "Step 2 Failed: Service not available" };
+  const availability = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_VIEWS, deviceId);
+  if (!availability.allowed) {
+    const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
+    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
   }
   
   // Step 3: Place order
   const order = await placeVideoOrder(tiktokUrl, videoCheck.videoId, SERVICES.TIKTOK_VIEWS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Step 3 Failed: ${order.error}` };
+    return { success: false, message: `Order failed: ${order.error}` };
   }
   
-  return { success: true, message: "TikTok Views boost order placed!", orderId: order.orderId };
+  return { success: true, message: "TikTok Views boost order placed successfully!", orderId: order.orderId };
 }
 
 async function boostTikTokLikes(tiktokUrl: string): Promise<{ success: boolean; message: string; orderId?: string }> {
@@ -349,20 +373,21 @@ async function boostTikTokLikes(tiktokUrl: string): Promise<{ success: boolean; 
   
   const videoCheck = await checkVideoId(tiktokUrl);
   if (!videoCheck.success || !videoCheck.videoId) {
-    return { success: false, message: `Step 1 Failed: ${videoCheck.error}` };
+    return { success: false, message: `Video check failed: ${videoCheck.error}` };
   }
   
-  const available = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_LIKES, deviceId);
-  if (!available) {
-    return { success: false, message: "Step 2 Failed: Service not available" };
+  const availability = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_LIKES, deviceId);
+  if (!availability.allowed) {
+    const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
+    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
   }
   
   const order = await placeVideoOrder(tiktokUrl, videoCheck.videoId, SERVICES.TIKTOK_LIKES, deviceId);
   if (!order.success) {
-    return { success: false, message: `Step 3 Failed: ${order.error}` };
+    return { success: false, message: `Order failed: ${order.error}` };
   }
   
-  return { success: true, message: "TikTok Likes boost order placed!", orderId: order.orderId };
+  return { success: true, message: "TikTok Likes boost order placed successfully!", orderId: order.orderId };
 }
 
 async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boolean; message: string; orderId?: string; userInfo?: { nickname: string; followers: number } }> {
@@ -370,30 +395,35 @@ async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boole
   
   const username = extractUsername(tiktokUrl);
   if (!username) {
-    return { success: false, message: "Could not extract username from URL" };
+    return { success: false, message: "Could not extract username from URL. Use format: tiktok.com/@username" };
   }
   
   // Step 1: Check username
   const userCheck = await checkUsernameProxy(username);
   if (!userCheck.success) {
-    return { success: false, message: `Step 1 Failed: ${userCheck.error}` };
+    return { success: false, message: `User check failed: ${userCheck.error}` };
   }
   
   // Step 2: Check service availability
-  const available = await checkAccountServiceAvailability(username, SERVICES.TIKTOK_FOLLOWERS, deviceId);
-  if (!available) {
-    return { success: false, message: "Step 2 Failed: Service not available" };
+  const availability = await checkAccountServiceAvailability(username, SERVICES.TIKTOK_FOLLOWERS, deviceId);
+  if (!availability.allowed) {
+    const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
+    return { 
+      success: false, 
+      message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}`,
+      userInfo: { nickname: userCheck.nickname || "", followers: userCheck.followers || 0 }
+    };
   }
   
   // Step 3: Place order
   const order = await placeAccountOrder(tiktokUrl, username, SERVICES.TIKTOK_FOLLOWERS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Step 3 Failed: ${order.error}` };
+    return { success: false, message: `Order failed: ${order.error}` };
   }
   
   return { 
     success: true, 
-    message: "TikTok Followers boost order placed!", 
+    message: "TikTok Followers boost order placed successfully!", 
     orderId: order.orderId,
     userInfo: { nickname: userCheck.nickname || "", followers: userCheck.followers || 0 }
   };
@@ -402,33 +432,35 @@ async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boole
 async function boostTelegramViews(telegramUrl: string): Promise<{ success: boolean; message: string; orderId?: string }> {
   const deviceId = generateDeviceId();
   
-  const available = await checkGenericServiceAvailability(SERVICES.TELEGRAM_VIEWS, deviceId);
-  if (!available) {
-    return { success: false, message: "Step 1 Failed: Service not available" };
+  const availability = await checkGenericServiceAvailability(SERVICES.TELEGRAM_VIEWS, deviceId);
+  if (!availability.allowed) {
+    const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
+    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
   }
   
   const order = await placeGenericOrder(telegramUrl, SERVICES.TELEGRAM_VIEWS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Step 2 Failed: ${order.error}` };
+    return { success: false, message: `Order failed: ${order.error}` };
   }
   
-  return { success: true, message: "Telegram Views boost order placed!", orderId: order.orderId };
+  return { success: true, message: "Telegram Views boost order placed successfully!", orderId: order.orderId };
 }
 
 async function boostFacebookShares(facebookUrl: string): Promise<{ success: boolean; message: string; orderId?: string }> {
   const deviceId = generateDeviceId();
   
-  const available = await checkGenericServiceAvailability(SERVICES.FACEBOOK_SHARES, deviceId, "share");
-  if (!available) {
-    return { success: false, message: "Step 1 Failed: Service not available" };
+  const availability = await checkGenericServiceAvailability(SERVICES.FACEBOOK_SHARES, deviceId, "share");
+  if (!availability.allowed) {
+    const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
+    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
   }
   
   const order = await placeGenericOrder(facebookUrl, SERVICES.FACEBOOK_SHARES, deviceId, "share");
   if (!order.success) {
-    return { success: false, message: `Step 2 Failed: ${order.error}` };
+    return { success: false, message: `Order failed: ${order.error}` };
   }
   
-  return { success: true, message: "Facebook Shares boost order placed!", orderId: order.orderId };
+  return { success: true, message: "Facebook Shares boost order placed successfully!", orderId: order.orderId };
 }
 
 serve(async (req) => {
