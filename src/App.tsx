@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { useTelegramWebhook } from "./hooks/useTelegramWebhook";
+import { AntiDDoSProvider } from "./components/AntiDDoSProvider";
 
 const queryClient = new QueryClient();
 
@@ -24,11 +25,13 @@ const AppContent = () => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <AppContent />
-    </TooltipProvider>
+    <AntiDDoSProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <AppContent />
+      </TooltipProvider>
+    </AntiDDoSProvider>
   </QueryClientProvider>
 );
 

@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { useAntiDDoSContext } from './AntiDDoSProvider';
 
 type Mode = 'checker' | 'searcher' | 'bomber';
 interface KeyInfo {
@@ -42,6 +43,7 @@ interface LogEntry {
 }
 
 const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
+  const { checkRateLimit, remainingRequests, isBlocked } = useAntiDDoSContext();
   const [mode, setMode] = useState<Mode>('checker');
   const [menuOpen, setMenuOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -177,6 +179,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   };
 
   const handleStart = async () => {
+    // Check rate limit before starting
+    if (!checkRateLimit()) {
+      addLog('Rate limit exceeded! Please wait before making more requests.', 'info');
+      toast.error('Rate limit exceeded! Please wait before trying again.');
+      return;
+    }
+
     if (mode === 'checker' && !file) {
       addLog('Please select a file first!', 'info');
       toast.error('Please upload a file first!');
@@ -320,6 +329,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       let success = false;
       
       while (!success && retryCount < maxRetries && !shouldStopRef.current) {
+        // Check rate limit before each request
+        if (!checkRateLimit()) {
+          addLog('Rate limited! Waiting 30 seconds...', 'info');
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          continue;
+        }
+        
         try {
           addLog(`[${accountNum}/${validLines.length}] Checking: ${account.split(':')[0]}${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`, 'info');
           
@@ -492,6 +508,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
           break;
         }
 
+        // Check rate limit before each iteration
+        if (!checkRateLimit()) {
+          addLog('Rate limited! Waiting 30 seconds...', 'info');
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          continue;
+        }
+
         addLog(`[${i + 1}/${bomberIterations}] Sending batch requests...`, 'info');
 
         const { data, error } = await supabase.functions.invoke('sms-bomber', {
@@ -594,6 +617,18 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
           {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : 'SMS Bomber'}
         </h1>
+        
+        {/* Protection Status */}
+        <div className="flex items-center justify-center gap-2 mt-2">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/30">
+            <Shield className="w-3 h-3 text-green-500" />
+            <span className="text-xs text-green-500 font-medium">Protected</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/50 border border-border/50">
+            <span className="text-xs text-muted-foreground">Requests: {remainingRequests}</span>
+          </div>
+        </div>
+
         {keyInfo && (
           <div className="flex items-center justify-center gap-1.5 mt-1 text-xs">
             <span className={`w-1.5 h-1.5 rounded-full ${
