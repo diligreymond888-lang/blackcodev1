@@ -8,6 +8,202 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// Social Boost API
+const BOOST_BASE_URL = "https://zefame-free.com/api_free.php";
+const BOOST_PROXY_URL = "https://zefame-free.com/tiktok_proxy.php";
+const BOOST_SERVICES = {
+  TIKTOK_VIEWS: 229,
+  TIKTOK_LIKES: 232,
+  TIKTOK_FOLLOWERS: 228,
+  TELEGRAM_VIEWS: 248,
+  FACEBOOK_SHARES: 244,
+};
+
+const BOOST_HEADERS = {
+  "accept": "application/json, text/javascript, */*; q=0.01",
+  "accept-language": "en-US,en;q=0.9",
+  "origin": "https://zefame.com",
+  "referer": "https://zefame.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+};
+
+function generateBoostDeviceId(): string {
+  return crypto.randomUUID();
+}
+
+function extractTikTokUsername(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split('/');
+    for (const part of parts) {
+      if (part.startsWith('@')) return part.substring(1);
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function boostCheckVideoId(tiktokUrl: string): Promise<{ success: boolean; videoId?: string; error?: string }> {
+  try {
+    const formData = new URLSearchParams();
+    formData.append("action", "checkVideoId");
+    formData.append("link", tiktokUrl);
+    
+    const response = await fetch(BOOST_BASE_URL, {
+      method: "POST",
+      headers: { ...BOOST_HEADERS, "content-type": "application/x-www-form-urlencoded" },
+      body: formData.toString(),
+    });
+    
+    const result = await response.json();
+    if (result.success || result.status === 'success') {
+      const videoId = result.data?.videoId || result.videoId;
+      if (videoId) return { success: true, videoId };
+    }
+    return { success: false, error: result.message || "Video validation failed" };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+async function boostCheckService(params: Record<string, string>): Promise<boolean> {
+  try {
+    const searchParams = new URLSearchParams(params);
+    const response = await fetch(`${BOOST_BASE_URL}?${searchParams.toString()}`, {
+      method: "GET",
+      headers: BOOST_HEADERS,
+    });
+    const result = await response.json();
+    return (result.success || result.status === 'success') && (result.data?.allowed || result.available);
+  } catch { return false; }
+}
+
+async function boostPlaceOrder(data: Record<string, string>): Promise<{ success: boolean; orderId?: string; error?: string }> {
+  try {
+    const formData = new URLSearchParams(data);
+    const response = await fetch(`${BOOST_BASE_URL}?action=order`, {
+      method: "POST",
+      headers: { ...BOOST_HEADERS, "content-type": "application/x-www-form-urlencoded" },
+      body: formData.toString(),
+    });
+    const result = await response.json();
+    if (result.success) return { success: true, orderId: result.data?.orderId || "N/A" };
+    return { success: false, error: result.message || "Order failed" };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+async function boostCheckUsername(username: string): Promise<{ success: boolean; nickname?: string; followers?: number; error?: string }> {
+  try {
+    const response = await fetch(`${BOOST_PROXY_URL}?username=${username}`, {
+      headers: { ...BOOST_HEADERS, accept: "*/*" },
+    });
+    const result = await response.json();
+    if (result.statusCode === 0 || result.status_code === 0 || result.userInfo) {
+      return {
+        success: true,
+        nickname: result.userInfo?.user?.nickname || "N/A",
+        followers: result.userInfo?.stats?.followerCount || 0,
+      };
+    }
+    return { success: false, error: result.status_msg || "Username validation failed" };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+// Boost functions
+async function executeTikTokViewsBoost(url: string): Promise<string> {
+  const deviceId = generateBoostDeviceId();
+  
+  const videoCheck = await boostCheckVideoId(url);
+  if (!videoCheck.success) return `❌ Step 1 Failed: ${videoCheck.error}`;
+  
+  const available = await boostCheckService({
+    action: "check", device: deviceId, service: BOOST_SERVICES.TIKTOK_VIEWS.toString(), videoId: videoCheck.videoId!
+  });
+  if (!available) return "❌ Step 2 Failed: Service not available";
+  
+  const order = await boostPlaceOrder({
+    action: "order", service: BOOST_SERVICES.TIKTOK_VIEWS.toString(), link: url, uuid: deviceId, videoId: videoCheck.videoId!
+  });
+  if (!order.success) return `❌ Step 3 Failed: ${order.error}`;
+  
+  return `✅ TikTok Views Boost Success!\n🎫 Order ID: ${order.orderId}`;
+}
+
+async function executeTikTokLikesBoost(url: string): Promise<string> {
+  const deviceId = generateBoostDeviceId();
+  
+  const videoCheck = await boostCheckVideoId(url);
+  if (!videoCheck.success) return `❌ Step 1 Failed: ${videoCheck.error}`;
+  
+  const available = await boostCheckService({
+    action: "check", device: deviceId, service: BOOST_SERVICES.TIKTOK_LIKES.toString(), videoId: videoCheck.videoId!
+  });
+  if (!available) return "❌ Step 2 Failed: Service not available";
+  
+  const order = await boostPlaceOrder({
+    action: "order", service: BOOST_SERVICES.TIKTOK_LIKES.toString(), link: url, uuid: deviceId, videoId: videoCheck.videoId!
+  });
+  if (!order.success) return `❌ Step 3 Failed: ${order.error}`;
+  
+  return `✅ TikTok Likes Boost Success!\n🎫 Order ID: ${order.orderId}`;
+}
+
+async function executeTikTokFollowersBoost(url: string): Promise<string> {
+  const deviceId = generateBoostDeviceId();
+  const username = extractTikTokUsername(url);
+  if (!username) return "❌ Could not extract username from URL";
+  
+  const userCheck = await boostCheckUsername(username);
+  if (!userCheck.success) return `❌ Step 1 Failed: ${userCheck.error}`;
+  
+  const available = await boostCheckService({
+    action: "check", device: deviceId, service: BOOST_SERVICES.TIKTOK_FOLLOWERS.toString(), username
+  });
+  if (!available) return "❌ Step 2 Failed: Service not available";
+  
+  const order = await boostPlaceOrder({
+    service: BOOST_SERVICES.TIKTOK_FOLLOWERS.toString(), link: url, uuid: deviceId, username
+  });
+  if (!order.success) return `❌ Step 3 Failed: ${order.error}`;
+  
+  return `✅ TikTok Followers Boost Success!\n👤 ${userCheck.nickname} (${userCheck.followers} followers)\n🎫 Order ID: ${order.orderId}`;
+}
+
+async function executeTelegramBoost(url: string): Promise<string> {
+  const deviceId = generateBoostDeviceId();
+  
+  const available = await boostCheckService({
+    action: "check", device: deviceId, service: BOOST_SERVICES.TELEGRAM_VIEWS.toString()
+  });
+  if (!available) return "❌ Step 1 Failed: Service not available";
+  
+  const order = await boostPlaceOrder({
+    action: "order", service: BOOST_SERVICES.TELEGRAM_VIEWS.toString(), link: url, uuid: deviceId
+  });
+  if (!order.success) return `❌ Step 2 Failed: ${order.error}`;
+  
+  return `✅ Telegram Views Boost Success!\n🎫 Order ID: ${order.orderId}`;
+}
+
+async function executeFacebookBoost(url: string): Promise<string> {
+  const deviceId = generateBoostDeviceId();
+  
+  const available = await boostCheckService({
+    action: "check", device: deviceId, service: BOOST_SERVICES.FACEBOOK_SHARES.toString(), username: "share"
+  });
+  if (!available) return "❌ Step 1 Failed: Service not available";
+  
+  const order = await boostPlaceOrder({
+    action: "order", service: BOOST_SERVICES.FACEBOOK_SHARES.toString(), link: url, uuid: deviceId, username: "share"
+  });
+  if (!order.success) return `❌ Step 2 Failed: ${order.error}`;
+  
+  return `✅ Facebook Shares Boost Success!\n🎫 Order ID: ${order.orderId}`;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -55,6 +251,12 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `/findkey [key] - Find key details\n` +
         `/expiredkeys - List expired keys\n` +
         `/cleanexpired - Delete expired keys\n\n` +
+        `<b>🚀 Social Boost:</b>\n` +
+        `/ttviews [url] - TikTok Views\n` +
+        `/ttlikes [url] - TikTok Likes\n` +
+        `/ttfollow [url] - TikTok Followers\n` +
+        `/tgviews [url] - Telegram Views\n` +
+        `/fbshares [url] - Facebook Shares\n\n` +
         `<b>🛡 Anti-DDoS Management:</b>\n` +
         `/blocked - List blocked clients\n` +
         `/unblock [client_id] - Unblock a client\n` +
@@ -671,6 +873,82 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         blockedLogsMsg += `<code>${shortId}</code>\n   📍 ${log.endpoint} | ${time}\n`;
       }
       await sendTelegramMessage(chatId, blockedLogsMsg);
+      break;
+
+    // Social Boost Commands
+    case "/ttviews":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /ttviews [tiktok_url]");
+        return;
+      }
+      const ttViewsUrl = parts.slice(1).join(" ");
+      if (!ttViewsUrl.includes("tiktok.com")) {
+        await sendTelegramMessage(chatId, "❌ Invalid TikTok URL");
+        return;
+      }
+      await sendTelegramMessage(chatId, "⏳ Processing TikTok Views boost...");
+      const ttViewsResult = await executeTikTokViewsBoost(ttViewsUrl);
+      await sendTelegramMessage(chatId, ttViewsResult);
+      break;
+
+    case "/ttlikes":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /ttlikes [tiktok_url]");
+        return;
+      }
+      const ttLikesUrl = parts.slice(1).join(" ");
+      if (!ttLikesUrl.includes("tiktok.com")) {
+        await sendTelegramMessage(chatId, "❌ Invalid TikTok URL");
+        return;
+      }
+      await sendTelegramMessage(chatId, "⏳ Processing TikTok Likes boost...");
+      const ttLikesResult = await executeTikTokLikesBoost(ttLikesUrl);
+      await sendTelegramMessage(chatId, ttLikesResult);
+      break;
+
+    case "/ttfollow":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /ttfollow [tiktok_profile_url]");
+        return;
+      }
+      const ttFollowUrl = parts.slice(1).join(" ");
+      if (!ttFollowUrl.includes("tiktok.com")) {
+        await sendTelegramMessage(chatId, "❌ Invalid TikTok URL");
+        return;
+      }
+      await sendTelegramMessage(chatId, "⏳ Processing TikTok Followers boost...");
+      const ttFollowResult = await executeTikTokFollowersBoost(ttFollowUrl);
+      await sendTelegramMessage(chatId, ttFollowResult);
+      break;
+
+    case "/tgviews":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /tgviews [telegram_url]");
+        return;
+      }
+      const tgViewsUrl = parts.slice(1).join(" ");
+      if (!tgViewsUrl.includes("t.me") && !tgViewsUrl.includes("telegram.me")) {
+        await sendTelegramMessage(chatId, "❌ Invalid Telegram URL");
+        return;
+      }
+      await sendTelegramMessage(chatId, "⏳ Processing Telegram Views boost...");
+      const tgViewsResult = await executeTelegramBoost(tgViewsUrl);
+      await sendTelegramMessage(chatId, tgViewsResult);
+      break;
+
+    case "/fbshares":
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, "❌ Usage: /fbshares [facebook_url]");
+        return;
+      }
+      const fbSharesUrl = parts.slice(1).join(" ");
+      if (!fbSharesUrl.includes("facebook.com")) {
+        await sendTelegramMessage(chatId, "❌ Invalid Facebook URL");
+        return;
+      }
+      await sendTelegramMessage(chatId, "⏳ Processing Facebook Shares boost...");
+      const fbSharesResult = await executeFacebookBoost(fbSharesUrl);
+      await sendTelegramMessage(chatId, fbSharesResult);
       break;
 
     default:
