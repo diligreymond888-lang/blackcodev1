@@ -60,32 +60,28 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
     setKeyInfo(null);
 
     try {
-      // Check if key exists and is valid (not used and active)
-      const { data, error } = await supabase
-        .from('access_keys')
-        .select('*')
-        .eq('key_value', key.trim())
-        .eq('is_active', true)
-        .eq('is_used', false)
-        .maybeSingle();
+      // Use SECURITY DEFINER function to validate key securely
+      const { data: validationResult, error: validationError } = await supabase
+        .rpc('validate_access_key', { p_key_value: key.trim() });
 
-      if (error) {
-        console.error('Error validating key:', error);
+      if (validationError) {
+        console.error('Error validating key:', validationError);
         toast.error('Error validating key');
         return;
       }
 
-      if (!data) {
-        // Check if key exists but is already used
-        const { data: usedKey } = await supabase
-          .from('access_keys')
-          .select('is_used')
-          .eq('key_value', key.trim())
-          .maybeSingle();
-
-        if (usedKey?.is_used) {
+      if (!validationResult?.valid) {
+        const reason = validationResult?.reason || 'invalid';
+        
+        if (reason === 'used') {
           toast.error('This key has already been used');
           setKeyInfo({ status: 'Used', duration: 'N/A' });
+        } else if (reason === 'expired') {
+          toast.error('This key has expired');
+          setKeyInfo({ status: 'Expired', duration: 'Expired' });
+        } else if (reason === 'inactive') {
+          toast.error('This key is inactive');
+          setKeyInfo({ status: 'Inactive', duration: 'N/A' });
         } else {
           toast.error('Invalid key');
           setKeyInfo({ status: 'Invalid', duration: 'N/A' });
@@ -93,39 +89,24 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
         return;
       }
 
-      // Check if key is expired (unless it's lifetime)
-      if (!data.is_lifetime && data.expires_at) {
-        const expiresAt = new Date(data.expires_at);
-        if (expiresAt < new Date()) {
-          toast.error('This key has expired');
-          setKeyInfo({ status: 'Expired', duration: 'Expired' });
-          return;
-        }
-      }
+      // Use SECURITY DEFINER function to mark key as used
+      const { data: useResult, error: useError } = await supabase
+        .rpc('use_access_key', { p_key_id: validationResult.id });
 
-      // Mark the key as used
-      const { error: updateError } = await supabase
-        .from('access_keys')
-        .update({ 
-          is_used: true, 
-          used_at: new Date().toISOString() 
-        })
-        .eq('id', data.id);
-
-      if (updateError) {
-        console.error('Error marking key as used:', updateError);
+      if (useError || !useResult?.success) {
+        console.error('Error marking key as used:', useError);
         toast.error('Error activating key');
         return;
       }
 
       // Key is valid!
-      const duration = calculateDuration(data.expires_at, data.is_lifetime);
+      const duration = calculateDuration(useResult.expires_at, useResult.is_lifetime);
       const info: KeyInfo = { 
         status: 'Valid', 
         duration,
-        expiresAt: data.expires_at,
-        isLifetime: data.is_lifetime,
-        keyValue: data.key_value
+        expiresAt: useResult.expires_at,
+        isLifetime: useResult.is_lifetime,
+        keyValue: useResult.key_value
       };
       setKeyInfo({ status: 'Valid', duration });
       toast.success('Key activated successfully!');
