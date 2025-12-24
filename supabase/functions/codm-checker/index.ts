@@ -587,6 +587,79 @@ async function checkAccount(account: string, password: string): Promise<Record<s
   }
 }
 
+// Input validation for accounts
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+function validateAccountInput(accounts: unknown): ValidationResult {
+  const errors: string[] = [];
+  
+  if (!Array.isArray(accounts)) {
+    errors.push('Accounts must be an array');
+    return { valid: false, errors };
+  }
+  
+  if (accounts.length === 0) {
+    errors.push('At least one account required');
+    return { valid: false, errors };
+  }
+  
+  if (accounts.length > 10) {
+    errors.push('Maximum 10 accounts per request');
+    return { valid: false, errors };
+  }
+  
+  for (let i = 0; i < accounts.length; i++) {
+    const line = accounts[i];
+    
+    if (typeof line !== 'string') {
+      errors.push(`Account ${i + 1}: must be a string`);
+      continue;
+    }
+    
+    if (line.length > 500) {
+      errors.push(`Account ${i + 1}: exceeds maximum length (500 chars)`);
+      continue;
+    }
+    
+    // Only allow printable ASCII characters
+    if (!/^[\x20-\x7E]+$/.test(line)) {
+      errors.push(`Account ${i + 1}: contains invalid characters`);
+      continue;
+    }
+    
+    const parts = line.split(':');
+    if (parts.length < 2) {
+      errors.push(`Account ${i + 1}: invalid format (use email:password)`);
+      continue;
+    }
+    
+    const email = parts[0].trim();
+    if (email.length < 3 || email.length > 100) {
+      errors.push(`Account ${i + 1}: invalid email length`);
+      continue;
+    }
+    
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.push(`Account ${i + 1}: invalid email format`);
+      continue;
+    }
+    
+    const password = parts.slice(1).join(':').trim();
+    if (password.length < 1 || password.length > 200) {
+      errors.push(`Account ${i + 1}: invalid password length`);
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -604,11 +677,22 @@ serve(async (req) => {
       );
     }
 
+    // Parse body with size limit check
+    const contentLength = parseInt(req.headers.get('content-length') || '0');
+    if (contentLength > 50000) { // 50KB max
+      return new Response(
+        JSON.stringify({ error: 'Request body too large' }),
+        { status: 413, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { accounts } = await req.json();
 
-    if (!accounts?.length) {
+    // Validate input
+    const validation = validateAccountInput(accounts);
+    if (!validation.valid) {
       return new Response(
-        JSON.stringify({ error: 'No accounts provided' }),
+        JSON.stringify({ error: 'Validation failed', details: validation.errors }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
