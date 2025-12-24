@@ -61,9 +61,11 @@ async function handleCommand(chatId: number, text: string, userId: number) {
         `/unblockall - Unblock all clients\n` +
         `/ratelimits - View rate limits\n` +
         `/clearratelimits - Clear rate limits\n\n` +
-        `<b>📊 Monitoring:</b>\n` +
+        `<b>📊 Real-Time Monitoring:</b>\n` +
         `/stats - Key statistics\n` +
-        `/ddosstats - Anti-DDoS stats\n` +
+        `/ddosstats - Live Anti-DDoS stats\n` +
+        `/live - Real-time traffic summary\n` +
+        `/threats - Active threat analysis\n` +
         `/recentlogs [count] - Recent requests\n` +
         `/blockedlogs [count] - Blocked requests`
       );
@@ -444,36 +446,175 @@ async function handleCommand(chatId: number, text: string, userId: number) {
       break;
 
     case "/ddosstats":
-      const { data: blockedStats } = await supabase
-        .from("blocked_clients")
-        .select("*");
-      
-      const { data: rateStats } = await supabase
-        .from("rate_limits")
-        .select("*");
-      
-      const { data: logStats } = await supabase
-        .from("request_logs")
-        .select("*")
-        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+      const now = new Date();
+      const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const last1h = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+      const last5m = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
 
-      const activeBlocked = blockedStats?.filter(b => b.is_active).length || 0;
-      const totalBlocked = blockedStats?.length || 0;
-      const activeRateLimits = rateStats?.length || 0;
-      const totalRequests24h = logStats?.length || 0;
-      const blockedRequests24h = logStats?.filter(l => l.was_blocked).length || 0;
+      const [blockedResult, rateResult, logs24hResult, logs1hResult, logs5mResult] = await Promise.all([
+        supabase.from("blocked_clients").select("*"),
+        supabase.from("rate_limits").select("*"),
+        supabase.from("request_logs").select("*").gte("created_at", last24h),
+        supabase.from("request_logs").select("*").gte("created_at", last1h),
+        supabase.from("request_logs").select("*").gte("created_at", last5m)
+      ]);
 
-      await sendTelegramMessage(
-        chatId,
-        `🛡 <b>Anti-DDoS Statistics</b>\n\n` +
-        `🚫 Active Blocks: ${activeBlocked}\n` +
-        `📊 Total Blocks: ${totalBlocked}\n` +
-        `⏱ Active Rate Limits: ${activeRateLimits}\n\n` +
-        `<b>Last 24 Hours:</b>\n` +
-        `📥 Total Requests: ${totalRequests24h}\n` +
-        `🔴 Blocked: ${blockedRequests24h}\n` +
-        `✅ Allowed: ${totalRequests24h - blockedRequests24h}`
-      );
+      const blockedStats = blockedResult.data || [];
+      const rateStats = rateResult.data || [];
+      const logs24h = logs24hResult.data || [];
+      const logs1h = logs1hResult.data || [];
+      const logs5m = logs5mResult.data || [];
+
+      const activeBlocked = blockedStats.filter(b => b.is_active && new Date(b.expires_at) > now).length;
+      const expiredBlocks = blockedStats.filter(b => b.is_active && new Date(b.expires_at) <= now).length;
+      const activeRateLimits = rateStats.length;
+      
+      const blocked24h = logs24h.filter(l => l.was_blocked).length;
+      const blocked1h = logs1h.filter(l => l.was_blocked).length;
+      const blocked5m = logs5m.filter(l => l.was_blocked).length;
+
+      // Calculate rates
+      const reqPerMin = logs5m.length > 0 ? (logs5m.length / 5).toFixed(1) : "0";
+      const blockRate = logs24h.length > 0 ? ((blocked24h / logs24h.length) * 100).toFixed(1) : "0";
+
+      // Find top attackers
+      const attackerCounts: Record<string, number> = {};
+      logs1h.filter(l => l.was_blocked).forEach(l => {
+        attackerCounts[l.client_id] = (attackerCounts[l.client_id] || 0) + 1;
+      });
+      const topAttackers = Object.entries(attackerCounts)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 3);
+
+      let ddosMsg = `🛡 <b>Anti-DDoS Live Stats</b>\n` +
+        `<i>Updated: ${now.toLocaleTimeString()}</i>\n\n` +
+        `<b>🚫 Active Blocks:</b> ${activeBlocked}\n` +
+        `<b>⏰ Expired Blocks:</b> ${expiredBlocks}\n` +
+        `<b>⚡ Rate Limits:</b> ${activeRateLimits}\n\n` +
+        `<b>📊 Traffic (Last 5 min):</b>\n` +
+        `   📥 Requests: ${logs5m.length}\n` +
+        `   🔴 Blocked: ${blocked5m}\n` +
+        `   ⚡ Rate: ${reqPerMin}/min\n\n` +
+        `<b>📈 Last Hour:</b>\n` +
+        `   📥 Requests: ${logs1h.length}\n` +
+        `   🔴 Blocked: ${blocked1h}\n\n` +
+        `<b>📅 Last 24 Hours:</b>\n` +
+        `   📥 Total: ${logs24h.length}\n` +
+        `   🔴 Blocked: ${blocked24h}\n` +
+        `   ✅ Allowed: ${logs24h.length - blocked24h}\n` +
+        `   📊 Block Rate: ${blockRate}%`;
+
+      if (topAttackers.length > 0) {
+        ddosMsg += `\n\n<b>🎯 Top Threats (1h):</b>\n`;
+        topAttackers.forEach(([id, count], i) => {
+          ddosMsg += `   ${i + 1}. <code>${id.substring(0, 10)}...</code> (${count} hits)\n`;
+        });
+      }
+
+      await sendTelegramMessage(chatId, ddosMsg);
+      break;
+
+    case "/live":
+      const liveNow = new Date();
+      const live1m = new Date(liveNow.getTime() - 60 * 1000).toISOString();
+      const live5m = new Date(liveNow.getTime() - 5 * 60 * 1000).toISOString();
+
+      const [live1mResult, live5mResult, liveBlockedResult] = await Promise.all([
+        supabase.from("request_logs").select("*").gte("created_at", live1m),
+        supabase.from("request_logs").select("*").gte("created_at", live5m),
+        supabase.from("blocked_clients").select("*").eq("is_active", true)
+      ]);
+
+      const reqs1m = live1mResult.data || [];
+      const reqs5m = live5mResult.data || [];
+      const liveBlocked = (liveBlockedResult.data || []).filter(b => new Date(b.expires_at) > liveNow);
+
+      // Group by endpoint
+      const endpointStats: Record<string, { total: number; blocked: number }> = {};
+      reqs5m.forEach(r => {
+        if (!endpointStats[r.endpoint]) {
+          endpointStats[r.endpoint] = { total: 0, blocked: 0 };
+        }
+        endpointStats[r.endpoint].total++;
+        if (r.was_blocked) endpointStats[r.endpoint].blocked++;
+      });
+
+      let liveMsg = `📡 <b>Live Traffic Monitor</b>\n` +
+        `<i>${liveNow.toLocaleTimeString()}</i>\n\n` +
+        `<b>⚡ Last 1 Minute:</b>\n` +
+        `   📥 Requests: ${reqs1m.length}\n` +
+        `   🔴 Blocked: ${reqs1m.filter(r => r.was_blocked).length}\n\n` +
+        `<b>📊 Last 5 Minutes:</b>\n` +
+        `   📥 Requests: ${reqs5m.length}\n` +
+        `   🔴 Blocked: ${reqs5m.filter(r => r.was_blocked).length}\n\n` +
+        `<b>🚫 Active Blocks:</b> ${liveBlocked.length}\n\n`;
+
+      if (Object.keys(endpointStats).length > 0) {
+        liveMsg += `<b>📍 Endpoints (5m):</b>\n`;
+        Object.entries(endpointStats)
+          .sort(([,a], [,b]) => b.total - a.total)
+          .slice(0, 5)
+          .forEach(([endpoint, stats]) => {
+            const status = stats.blocked > 0 ? "🔴" : "🟢";
+            liveMsg += `   ${status} ${endpoint}: ${stats.total} (${stats.blocked} blocked)\n`;
+          });
+      }
+
+      await sendTelegramMessage(chatId, liveMsg);
+      break;
+
+    case "/threats":
+      const threatNow = new Date();
+      const threat1h = new Date(threatNow.getTime() - 60 * 60 * 1000).toISOString();
+
+      const [threatLogsResult, threatBlockedResult] = await Promise.all([
+        supabase.from("request_logs").select("*").gte("created_at", threat1h).eq("was_blocked", true),
+        supabase.from("blocked_clients").select("*").eq("is_active", true)
+      ]);
+
+      const threatLogs = threatLogsResult.data || [];
+      const threatBlocked = (threatBlockedResult.data || []).filter(b => new Date(b.expires_at) > threatNow);
+
+      if (threatLogs.length === 0 && threatBlocked.length === 0) {
+        await sendTelegramMessage(chatId, `✅ <b>No Active Threats</b>\n\nSystem is operating normally.`);
+        break;
+      }
+
+      // Analyze threat patterns
+      const threatClients: Record<string, { count: number; endpoints: Set<string>; ips: Set<string> }> = {};
+      threatLogs.forEach(log => {
+        if (!threatClients[log.client_id]) {
+          threatClients[log.client_id] = { count: 0, endpoints: new Set(), ips: new Set() };
+        }
+        threatClients[log.client_id].count++;
+        threatClients[log.client_id].endpoints.add(log.endpoint);
+        if (log.ip_address) threatClients[log.client_id].ips.add(log.ip_address);
+      });
+
+      const sortedThreats = Object.entries(threatClients)
+        .sort(([,a], [,b]) => b.count - a.count)
+        .slice(0, 5);
+
+      let threatMsg = `⚠️ <b>Threat Analysis</b>\n` +
+        `<i>${threatNow.toLocaleTimeString()}</i>\n\n` +
+        `<b>🚨 Threat Level:</b> ${threatBlocked.length > 5 ? "HIGH" : threatBlocked.length > 0 ? "MEDIUM" : "LOW"}\n` +
+        `<b>🚫 Active Blocks:</b> ${threatBlocked.length}\n` +
+        `<b>🔴 Blocked Requests (1h):</b> ${threatLogs.length}\n\n`;
+
+      if (sortedThreats.length > 0) {
+        threatMsg += `<b>🎯 Top Threat Actors:</b>\n\n`;
+        sortedThreats.forEach(([clientId, data], i) => {
+          const shortId = clientId.substring(0, 12);
+          const isBlocked = threatBlocked.some(b => b.client_id === clientId);
+          threatMsg += `${i + 1}. <code>${shortId}...</code>\n`;
+          threatMsg += `   📊 Hits: ${data.count}\n`;
+          threatMsg += `   📍 Endpoints: ${data.endpoints.size}\n`;
+          threatMsg += `   🌐 IPs: ${data.ips.size}\n`;
+          threatMsg += `   Status: ${isBlocked ? "🔴 BLOCKED" : "⚠️ MONITORING"}\n\n`;
+        });
+      }
+
+      await sendTelegramMessage(chatId, threatMsg);
       break;
 
     case "/recentlogs":
