@@ -646,63 +646,62 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             </div>
           </>
         ) : mode === 'bomber' ? (
-          <>
+          <div className="space-y-4">
             {/* Phone Number Input */}
-            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3">
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-4">
+              <label className="text-muted-foreground text-xs font-medium block mb-2">Target Phone Number</label>
               <div className="flex items-center gap-3">
-                <Phone className="w-4 h-4 text-foreground shrink-0" />
+                <Phone className="w-5 h-5 text-primary shrink-0" />
                 <input
                   type="text"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="Enter phone number (09XXXXXXXXX)"
-                  className="flex-1 bg-transparent text-foreground text-sm placeholder:text-muted-foreground focus:outline-none"
+                  placeholder="09XXXXXXXXX or +639XXXXXXXXX"
+                  className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/60 focus:outline-none"
                   disabled={isRunning}
                 />
               </div>
             </div>
 
             {/* Iterations Selector */}
-            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-sm">Iterations:</span>
-                <div className="flex items-center gap-2">
-                  {[1, 5, 10].map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => setBomberIterations(num)}
-                      disabled={isRunning}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                        ${bomberIterations === num 
-                          ? 'bg-primary text-primary-foreground' 
-                          : 'bg-secondary/50 text-muted-foreground hover:bg-secondary'
-                        } disabled:opacity-50`}
-                    >
-                      {num}x
-                    </button>
-                  ))}
-                </div>
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-4">
+              <label className="text-muted-foreground text-xs font-medium block mb-3">Number of Iterations</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 5, 10].map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => setBomberIterations(num)}
+                    disabled={isRunning}
+                    className={`py-2.5 rounded-lg text-sm font-medium transition-all
+                      ${bomberIterations === num 
+                        ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30' 
+                        : 'bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground'
+                      } disabled:opacity-50`}
+                  >
+                    {num}x Blast
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Control Buttons */}
-            <div className="flex justify-center gap-3 pt-2">
+            <div className="grid grid-cols-3 gap-2 pt-2">
               <button
                 onClick={handleStart}
                 disabled={isRunning || !phoneNumber.trim()}
-                className="neon-button px-8 py-3 rounded-lg font-display text-sm font-medium 
-                           text-foreground hover:scale-105 active:scale-95 transition-transform
-                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <Zap className="w-4 h-4" />
-                Start Bombing
+                Start
               </button>
               <button
                 onClick={handleStop}
                 disabled={!isRunning}
-                className="neon-button px-6 py-3 rounded-lg font-display text-sm font-medium 
-                           text-foreground hover:scale-105 active:scale-95 transition-transform
-                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <Square className="w-4 h-4" />
                 Stop
@@ -710,15 +709,15 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               <button
                 onClick={handleRefresh}
                 disabled={isRunning}
-                className="neon-button px-6 py-3 rounded-lg font-display text-sm font-medium 
-                           text-foreground hover:scale-105 active:scale-95 transition-transform
-                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
-                Refresh
+                Reset
               </button>
             </div>
-          </>
+          </div>
         ) : (
           <>
             {/* File Upload */}
