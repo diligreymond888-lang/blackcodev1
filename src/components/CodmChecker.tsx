@@ -1,11 +1,11 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield, Rocket, TrendingUp, Heart, Users, Eye, Share2 } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield, Rocket, TrendingUp, Heart, Users, Eye, Share2, Link2Off } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useAntiDDoSContext } from './AntiDDoSProvider';
 
-type Mode = 'checker' | 'searcher' | 'bomber' | 'booster';
+type Mode = 'checker' | 'searcher' | 'bomber' | 'booster' | 'remover';
 interface KeyInfo {
   status: string;
   duration: string;
@@ -44,6 +44,12 @@ interface BoosterStats {
   total: number;
 }
 
+interface RemoverStats {
+  urlsRemoved: number;
+  linesProcessed: number;
+  totalLines: number;
+}
+
 interface LogEntry {
   id: number;
   message: string;
@@ -68,6 +74,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     fail: 0,
     total: 0,
   });
+  // Remover state
+  const [removerStats, setRemoverStats] = useState<RemoverStats>({
+    urlsRemoved: 0,
+    linesProcessed: 0,
+    totalLines: 0,
+  });
+  const [cleanedContent, setCleanedContent] = useState<string[]>([]);
   const [stats, setStats] = useState<Stats>({
     valid: 0,
     invalid: 0,
@@ -136,6 +149,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
     setBomberStats({ success: 0, fail: 0, total: 0, iterations: 0 });
     setBoosterStats({ success: 0, fail: 0, total: 0 });
+    setRemoverStats({ urlsRemoved: 0, linesProcessed: 0, totalLines: 0 });
+    setCleanedContent([]);
     setLogs([]);
     setOutputFiles([]);
     setFoundResults([]);
@@ -193,7 +208,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       checker: 'CODM Checker',
       searcher: 'Searcher Domain',
       bomber: 'SMS Bomber',
-      booster: 'Social Boost'
+      booster: 'Social Boost',
+      remover: 'URL Remover'
     };
     addLog(`Switched to ${modeNames[newMode]} mode`, 'info');
   };
@@ -230,6 +246,16 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       toast.error('Please enter a URL!');
       return;
     }
+    if (mode === 'remover' && !file) {
+      addLog('Please select a file first!', 'info');
+      toast.error('Please upload a file first!');
+      return;
+    }
+    if (mode === 'remover' && fileLines.length === 0) {
+      addLog('File is empty or still loading!', 'info');
+      toast.error('Please wait for file to load or select a valid file.');
+      return;
+    }
     
     shouldStopRef.current = false;
     setIsRunning(true);
@@ -240,7 +266,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       checker: 'checker',
       searcher: 'searcher',
       bomber: 'SMS bomber',
-      booster: 'social boost'
+      booster: 'social boost',
+      remover: 'URL remover'
     };
     addLog(`Starting ${modeNames[mode]}...`, 'info');
     
@@ -252,6 +279,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       await processBombing();
     } else if (mode === 'booster') {
       await processBoosting();
+    } else if (mode === 'remover') {
+      processRemovingUrls();
     }
     
     setIsProcessing(false);
@@ -646,6 +675,82 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     }
   };
 
+  const processRemovingUrls = () => {
+    if (fileLines.length === 0) {
+      addLog('Please upload a file first!', 'info');
+      toast.error('No file selected. Please upload a .txt file.');
+      setIsRunning(false);
+      return;
+    }
+
+    // URL regex pattern to match various URL formats
+    const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\/[^\s]*)?/gi;
+    
+    const cleanedLines: string[] = [];
+    let totalUrlsRemoved = 0;
+    
+    addLog(`Processing ${fileLines.length} lines...`, 'info');
+    setRemoverStats(prev => ({ ...prev, totalLines: fileLines.length }));
+
+    let lineIndex = 0;
+    
+    const processLine = () => {
+      if (shouldStopRef.current || lineIndex >= fileLines.length) {
+        setIsRunning(false);
+        setCleanedContent(cleanedLines);
+        setOutputFiles([`cleaned_${Date.now()}.txt`]);
+        addLog(`Complete! Removed ${totalUrlsRemoved} URLs from ${fileLines.length} lines.`, 'success');
+        toast.success(`Removed ${totalUrlsRemoved} URLs!`);
+        return;
+      }
+
+      const line = fileLines[lineIndex];
+      const urlMatches = line.match(urlPattern) || [];
+      const urlCount = urlMatches.length;
+      
+      // Remove all URLs from the line
+      const cleanedLine = line.replace(urlPattern, '').replace(/\s+/g, ' ').trim();
+      
+      if (urlCount > 0) {
+        addLog(`[${lineIndex + 1}/${fileLines.length}] Removed ${urlCount} URL(s): ${urlMatches.slice(0, 2).join(', ')}${urlCount > 2 ? '...' : ''}`, 'success');
+        totalUrlsRemoved += urlCount;
+      }
+      
+      // Only add non-empty cleaned lines
+      if (cleanedLine) {
+        cleanedLines.push(cleanedLine);
+      }
+      
+      setRemoverStats({
+        urlsRemoved: totalUrlsRemoved,
+        linesProcessed: lineIndex + 1,
+        totalLines: fileLines.length,
+      });
+      
+      lineIndex++;
+      setTimeout(processLine, 50);
+    };
+
+    processLine();
+  };
+
+  const handleDownloadCleaned = () => {
+    if (cleanedContent.length === 0) return;
+    
+    const content = cleanedContent.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cleaned_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog('Cleaned file downloaded!', 'info');
+    toast.success('File downloaded!');
+  };
+
   const getLogColor = (type: LogEntry['type']) => {
     switch (type) {
       case 'valid': return 'text-green-400';
@@ -707,12 +812,20 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               <Rocket className="w-4 h-4" />
               Social Boost
             </button>
+            <button
+              onClick={() => handleModeChange('remover')}
+              className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors flex items-center gap-2
+                ${mode === 'remover' ? 'bg-primary/20 text-primary' : 'text-foreground hover:bg-secondary/50'}`}
+            >
+              <Link2Off className="w-4 h-4" />
+              URL Remover
+            </button>
           </div>
         )}
 
         {/* Title */}
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
-          {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : mode === 'bomber' ? 'SMS Bomber' : 'Social Boost'}
+          {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : mode === 'bomber' ? 'SMS Bomber' : mode === 'booster' ? 'Social Boost' : 'URL Remover'}
         </h1>
         
         {/* Protection Status */}
@@ -930,6 +1043,61 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               </button>
             </div>
           </div>
+        ) : mode === 'remover' ? (
+          <div className="space-y-4">
+            {/* File Upload */}
+            <div 
+              className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3 
+                         flex items-center gap-3 cursor-pointer hover:bg-secondary/50 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="w-4 h-4 text-foreground shrink-0" />
+              <span className="text-muted-foreground text-sm truncate">
+                {file ? file.name : 'No file chosen'}
+              </span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </div>
+
+            {/* Control Buttons */}
+            <div className="grid grid-cols-3 gap-2 pt-2">
+              <button
+                onClick={handleStart}
+                disabled={isRunning || !file}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Link2Off className="w-4 h-4" />
+                Remove
+              </button>
+              <button
+                onClick={handleStop}
+                disabled={!isRunning}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Square className="w-4 h-4" />
+                Stop
+              </button>
+              <button
+                onClick={handleDownloadCleaned}
+                disabled={cleanedContent.length === 0}
+                className="neon-button py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-[1.02] active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Download
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {/* File Upload */}
@@ -1028,6 +1196,22 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             { label: 'Success', value: boosterStats.success, color: 'text-green-400' },
             { label: 'Failed', value: boosterStats.fail, color: 'text-red-400' },
             { label: 'Total', value: boosterStats.total, color: 'text-foreground' },
+          ].map((stat, index) => (
+            <div
+              key={index}
+              className="neon-border rounded-lg bg-card/30 backdrop-blur-sm p-3 sm:p-4 text-center"
+            >
+              <p className="text-muted-foreground text-xs font-medium mb-1">{stat.label}</p>
+              <p className={`text-xl sm:text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      ) : mode === 'remover' ? (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'URLs Removed', value: removerStats.urlsRemoved, color: 'text-green-400' },
+            { label: 'Lines Processed', value: removerStats.linesProcessed, color: 'text-primary' },
+            { label: 'Total Lines', value: removerStats.totalLines, color: 'text-foreground' },
           ].map((stat, index) => (
             <div
               key={index}
