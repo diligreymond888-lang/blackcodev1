@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.sms-bomber]
 verify_jwt = false
+
+[functions.anti-ddos]
+verify_jwt = false
