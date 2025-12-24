@@ -343,26 +343,50 @@ function formatTimeLeft(seconds: number): string {
   return `${minutes}m`;
 }
 
+// Translate French error messages to English
+function translateMessage(message: string): string {
+  const translations: Record<string, string> = {
+    "Vous avez déjà utilisé ce service": "You have already used this service",
+    "Attendez encore": "Wait another",
+    "Service non disponible": "Service not available",
+    "Erreur": "Error",
+    "Veuillez réessayer": "Please try again",
+    "Lien invalide": "Invalid link",
+    "Utilisateur non trouvé": "User not found",
+    "Vidéo non trouvée": "Video not found",
+  };
+  
+  let translated = message;
+  for (const [french, english] of Object.entries(translations)) {
+    translated = translated.replace(new RegExp(french, 'gi'), english);
+  }
+  
+  // Clean up time format (23h 19min -> 23h 19m)
+  translated = translated.replace(/(\d+)h\s*(\d+)min/g, '$1h $2m');
+  
+  return translated;
+}
+
 async function boostTikTokViews(tiktokUrl: string): Promise<{ success: boolean; message: string; orderId?: string }> {
   const deviceId = generateDeviceId();
   
   // Step 1: Check video ID
   const videoCheck = await checkVideoId(tiktokUrl);
   if (!videoCheck.success || !videoCheck.videoId) {
-    return { success: false, message: `Video check failed: ${videoCheck.error}` };
+    return { success: false, message: translateMessage(`Video check failed: ${videoCheck.error}`) };
   }
   
   // Step 2: Check service availability
   const availability = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_VIEWS, deviceId);
   if (!availability.allowed) {
     const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
-    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
+    return { success: false, message: `Service unavailable${cooldown}: ${translateMessage(availability.message || 'Try again later')}` };
   }
   
   // Step 3: Place order
   const order = await placeVideoOrder(tiktokUrl, videoCheck.videoId, SERVICES.TIKTOK_VIEWS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Order failed: ${order.error}` };
+    return { success: false, message: translateMessage(`Order failed: ${order.error}`) };
   }
   
   return { success: true, message: "TikTok Views boost order placed successfully!", orderId: order.orderId };
@@ -373,18 +397,18 @@ async function boostTikTokLikes(tiktokUrl: string): Promise<{ success: boolean; 
   
   const videoCheck = await checkVideoId(tiktokUrl);
   if (!videoCheck.success || !videoCheck.videoId) {
-    return { success: false, message: `Video check failed: ${videoCheck.error}` };
+    return { success: false, message: translateMessage(`Video check failed: ${videoCheck.error}`) };
   }
   
   const availability = await checkVideoServiceAvailability(videoCheck.videoId, SERVICES.TIKTOK_LIKES, deviceId);
   if (!availability.allowed) {
     const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
-    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
+    return { success: false, message: `Service unavailable${cooldown}: ${translateMessage(availability.message || 'Try again later')}` };
   }
   
   const order = await placeVideoOrder(tiktokUrl, videoCheck.videoId, SERVICES.TIKTOK_LIKES, deviceId);
   if (!order.success) {
-    return { success: false, message: `Order failed: ${order.error}` };
+    return { success: false, message: translateMessage(`Order failed: ${order.error}`) };
   }
   
   return { success: true, message: "TikTok Likes boost order placed successfully!", orderId: order.orderId };
@@ -401,7 +425,7 @@ async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boole
   // Step 1: Check username
   const userCheck = await checkUsernameProxy(username);
   if (!userCheck.success) {
-    return { success: false, message: `User check failed: ${userCheck.error}` };
+    return { success: false, message: translateMessage(`User check failed: ${userCheck.error}`) };
   }
   
   // Step 2: Check service availability
@@ -410,7 +434,7 @@ async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boole
     const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
     return { 
       success: false, 
-      message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}`,
+      message: `Service unavailable${cooldown}: ${translateMessage(availability.message || 'Try again later')}`,
       userInfo: { nickname: userCheck.nickname || "", followers: userCheck.followers || 0 }
     };
   }
@@ -418,7 +442,7 @@ async function boostTikTokFollowers(tiktokUrl: string): Promise<{ success: boole
   // Step 3: Place order
   const order = await placeAccountOrder(tiktokUrl, username, SERVICES.TIKTOK_FOLLOWERS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Order failed: ${order.error}` };
+    return { success: false, message: translateMessage(`Order failed: ${order.error}`) };
   }
   
   return { 
@@ -435,12 +459,12 @@ async function boostTelegramViews(telegramUrl: string): Promise<{ success: boole
   const availability = await checkGenericServiceAvailability(SERVICES.TELEGRAM_VIEWS, deviceId);
   if (!availability.allowed) {
     const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
-    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
+    return { success: false, message: `Service unavailable${cooldown}: ${translateMessage(availability.message || 'Try again later')}` };
   }
   
   const order = await placeGenericOrder(telegramUrl, SERVICES.TELEGRAM_VIEWS, deviceId);
   if (!order.success) {
-    return { success: false, message: `Order failed: ${order.error}` };
+    return { success: false, message: translateMessage(`Order failed: ${order.error}`) };
   }
   
   return { success: true, message: "Telegram Views boost order placed successfully!", orderId: order.orderId };
@@ -452,7 +476,7 @@ async function boostFacebookShares(facebookUrl: string): Promise<{ success: bool
   const availability = await checkGenericServiceAvailability(SERVICES.FACEBOOK_SHARES, deviceId, "share");
   if (!availability.allowed) {
     const cooldown = availability.timeLeft ? ` (Wait ${formatTimeLeft(availability.timeLeft)})` : '';
-    return { success: false, message: `Service unavailable${cooldown}: ${availability.message || 'Try again later'}` };
+    return { success: false, message: `Service unavailable${cooldown}: ${translateMessage(availability.message || 'Try again later')}` };
   }
   
   const order = await placeGenericOrder(facebookUrl, SERVICES.FACEBOOK_SHARES, deviceId, "share");
