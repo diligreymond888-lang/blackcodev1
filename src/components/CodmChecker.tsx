@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2 } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-type Mode = 'checker' | 'searcher';
+type Mode = 'checker' | 'searcher' | 'bomber';
 interface KeyInfo {
   status: string;
   duration: string;
@@ -28,10 +28,17 @@ interface SearcherStats {
   total: number;
 }
 
+interface BomberStats {
+  success: number;
+  fail: number;
+  total: number;
+  iterations: number;
+}
+
 interface LogEntry {
   id: number;
   message: string;
-  type: 'valid' | 'invalid' | 'clean' | 'notClean' | 'hasCodm' | 'info' | 'found' | 'notFound';
+  type: 'valid' | 'invalid' | 'clean' | 'notClean' | 'hasCodm' | 'info' | 'found' | 'notFound' | 'success' | 'fail';
 }
 
 const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
@@ -41,6 +48,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState(true);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [bomberIterations, setBomberIterations] = useState(5);
   const [stats, setStats] = useState<Stats>({
     valid: 0,
     invalid: 0,
@@ -52,6 +61,12 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     found: 0,
     notFound: 0,
     total: 0,
+  });
+  const [bomberStats, setBomberStats] = useState<BomberStats>({
+    success: 0,
+    fail: 0,
+    total: 0,
+    iterations: 0,
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [outputFiles, setOutputFiles] = useState<string[]>([]);
@@ -101,6 +116,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const resetStats = () => {
     setStats({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
+    setBomberStats({ success: 0, fail: 0, total: 0, iterations: 0 });
     setLogs([]);
     setOutputFiles([]);
     setFoundResults([]);
@@ -109,7 +125,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
 
   const handleRefresh = () => {
     resetStats();
-    addLog('Ready for new search...', 'info');
+    setPhoneNumber('');
+    addLog('Ready...', 'info');
   };
 
   const handleDownload = () => {
@@ -150,7 +167,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setMenuOpen(false);
     resetStats();
     setFile(null);
-    addLog(`Switched to ${newMode === 'checker' ? 'CODM Checker' : 'Searcher Domain'} mode`, 'info');
+    setPhoneNumber('');
+    const modeNames = {
+      checker: 'CODM Checker',
+      searcher: 'Searcher Domain',
+      bomber: 'SMS Bomber'
+    };
+    addLog(`Switched to ${modeNames[newMode]} mode`, 'info');
   };
 
   const handleStart = async () => {
@@ -168,17 +191,30 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       addLog('Please select Garena Domain!', 'info');
       return;
     }
+    if (mode === 'bomber' && !phoneNumber.trim()) {
+      addLog('Please enter a phone number!', 'info');
+      toast.error('Please enter a phone number!');
+      return;
+    }
     
     shouldStopRef.current = false;
     setIsRunning(true);
     setIsPaused(false);
     setIsProcessing(true);
-    addLog(`Starting ${mode === 'checker' ? 'checker' : 'searcher'}...`, 'info');
+    
+    const modeNames = {
+      checker: 'checker',
+      searcher: 'searcher',
+      bomber: 'SMS bomber'
+    };
+    addLog(`Starting ${modeNames[mode]}...`, 'info');
     
     if (mode === 'checker') {
       await processChecking();
-    } else {
+    } else if (mode === 'searcher') {
       simulateSearching();
+    } else if (mode === 'bomber') {
+      await processBombing();
     }
     
     setIsProcessing(false);
@@ -438,6 +474,66 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     }, 150);
   };
 
+  const processBombing = async () => {
+    if (!phoneNumber.trim()) {
+      addLog('Please enter a phone number!', 'info');
+      toast.error('Please enter a phone number!');
+      setIsRunning(false);
+      return;
+    }
+
+    addLog(`Target: ${phoneNumber}`, 'info');
+    addLog(`Starting ${bomberIterations} iterations...`, 'info');
+
+    try {
+      for (let i = 0; i < bomberIterations; i++) {
+        if (shouldStopRef.current) {
+          addLog('Bombing stopped by user.', 'info');
+          break;
+        }
+
+        addLog(`[${i + 1}/${bomberIterations}] Sending batch requests...`, 'info');
+
+        const { data, error } = await supabase.functions.invoke('sms-bomber', {
+          body: { phone: phoneNumber, iterations: 1 }
+        });
+
+        if (error) {
+          addLog(`Error: ${error.message}`, 'fail');
+          continue;
+        }
+
+        if (data?.results && Array.isArray(data.results)) {
+          for (const iteration of data.results) {
+            for (const result of iteration.results) {
+              if (result.success) {
+                addLog(`   ✓ ${result.name}`, 'success');
+                setBomberStats(prev => ({ ...prev, success: prev.success + 1, total: prev.total + 1 }));
+              } else {
+                addLog(`   ✗ ${result.name}`, 'fail');
+                setBomberStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
+              }
+            }
+          }
+        }
+
+        setBomberStats(prev => ({ ...prev, iterations: i + 1 }));
+
+        // Delay between iterations
+        if (i + 1 < bomberIterations && !shouldStopRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      setIsRunning(false);
+      addLog('Bombing complete!', 'info');
+      toast.success('SMS Bombing complete!');
+    } catch (err) {
+      addLog(`Error: ${err}`, 'fail');
+      setIsRunning(false);
+    }
+  };
+
   const getLogColor = (type: LogEntry['type']) => {
     switch (type) {
       case 'valid': return 'text-green-400';
@@ -447,6 +543,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       case 'hasCodm': return 'text-purple-400';
       case 'found': return 'text-primary';
       case 'notFound': return 'text-red-400';
+      case 'success': return 'text-green-400';
+      case 'fail': return 'text-red-400';
       default: return 'text-muted-foreground';
     }
   };
@@ -481,12 +579,20 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               <Search className="w-4 h-4" />
               Searcher Domain
             </button>
+            <button
+              onClick={() => handleModeChange('bomber')}
+              className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors flex items-center gap-2
+                ${mode === 'bomber' ? 'bg-primary/20 text-primary' : 'text-foreground hover:bg-secondary/50'}`}
+            >
+              <Zap className="w-4 h-4" />
+              SMS Bomber
+            </button>
           </div>
         )}
 
         {/* Title */}
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-center neon-text pt-1">
-          {mode === 'checker' ? 'CODM Checker' : 'Searcher Domain'}
+          {mode === 'checker' ? 'CODM Checker' : mode === 'searcher' ? 'Searcher Domain' : 'SMS Bomber'}
         </h1>
         {keyInfo && (
           <div className="flex items-center justify-center gap-1.5 mt-1 text-xs">
@@ -526,6 +632,80 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               >
                 <Search className="w-4 h-4" />
                 Search
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={isRunning}
+                className="neon-button px-6 py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-105 active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
+          </>
+        ) : mode === 'bomber' ? (
+          <>
+            {/* Phone Number Input */}
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Phone className="w-4 h-4 text-foreground shrink-0" />
+                <input
+                  type="text"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="Enter phone number (09XXXXXXXXX)"
+                  className="flex-1 bg-transparent text-foreground text-sm placeholder:text-muted-foreground focus:outline-none"
+                  disabled={isRunning}
+                />
+              </div>
+            </div>
+
+            {/* Iterations Selector */}
+            <div className="neon-border rounded-lg bg-secondary/30 backdrop-blur-sm px-4 py-3">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-sm">Iterations:</span>
+                <div className="flex items-center gap-2">
+                  {[1, 5, 10].map((num) => (
+                    <button
+                      key={num}
+                      onClick={() => setBomberIterations(num)}
+                      disabled={isRunning}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                        ${bomberIterations === num 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-secondary/50 text-muted-foreground hover:bg-secondary'
+                        } disabled:opacity-50`}
+                    >
+                      {num}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Control Buttons */}
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                onClick={handleStart}
+                disabled={isRunning || !phoneNumber.trim()}
+                className="neon-button px-8 py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-105 active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Zap className="w-4 h-4" />
+                Start Bombing
+              </button>
+              <button
+                onClick={handleStop}
+                disabled={!isRunning}
+                className="neon-button px-6 py-3 rounded-lg font-display text-sm font-medium 
+                           text-foreground hover:scale-105 active:scale-95 transition-transform
+                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Square className="w-4 h-4" />
+                Stop
               </button>
               <button
                 onClick={handleRefresh}
@@ -611,6 +791,23 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             >
               <p className="text-muted-foreground text-xs font-medium mb-1">{stat.label}</p>
               <p className={`text-xl sm:text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      ) : mode === 'bomber' ? (
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: 'Success', value: bomberStats.success, color: 'text-green-400' },
+            { label: 'Failed', value: bomberStats.fail, color: 'text-red-400' },
+            { label: 'Total', value: bomberStats.total, color: 'text-foreground' },
+            { label: 'Iterations', value: bomberStats.iterations, color: 'text-primary' },
+          ].map((stat, index) => (
+            <div
+              key={index}
+              className="neon-border rounded-lg bg-card/30 backdrop-blur-sm p-2 sm:p-3 text-center"
+            >
+              <p className="text-muted-foreground text-[10px] sm:text-xs font-medium mb-1">{stat.label}</p>
+              <p className={`text-lg sm:text-xl font-display font-bold ${stat.color}`}>{stat.value}</p>
             </div>
           ))}
         </div>

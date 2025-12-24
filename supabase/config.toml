@@ -2,3 +2,9 @@ project_id = "fokxdpkpdtwfhtpjrvdc"
 
 [functions.telegram-bot]
 verify_jwt = false
+
+[functions.codm-checker]
+verify_jwt = false
+
+[functions.sms-bomber]
+verify_jwt = false
