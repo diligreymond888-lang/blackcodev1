@@ -60,9 +60,15 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
     setKeyInfo(null);
 
     try {
+      // Type for validation result
+      type ValidationResult = { valid: boolean; reason?: string; id?: string; is_lifetime?: boolean; expires_at?: string };
+      type UseResult = { success: boolean; key_value?: string; is_lifetime?: boolean; expires_at?: string };
+
       // Use SECURITY DEFINER function to validate key securely
-      const { data: validationResult, error: validationError } = await supabase
+      const { data: validationData, error: validationError } = await supabase
         .rpc('validate_access_key', { p_key_value: key.trim() });
+
+      const validationResult = validationData as ValidationResult | null;
 
       if (validationError) {
         console.error('Error validating key:', validationError);
@@ -90,8 +96,10 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
       }
 
       // Use SECURITY DEFINER function to mark key as used
-      const { data: useResult, error: useError } = await supabase
+      const { data: useData, error: useError } = await supabase
         .rpc('use_access_key', { p_key_id: validationResult.id });
+
+      const useResult = useData as UseResult | null;
 
       if (useError || !useResult?.success) {
         console.error('Error marking key as used:', useError);
@@ -100,13 +108,13 @@ const KeyInput = ({ onValidKey }: KeyInputProps) => {
       }
 
       // Key is valid!
-      const duration = calculateDuration(useResult.expires_at, useResult.is_lifetime);
+      const duration = calculateDuration(useResult.expires_at || null, useResult.is_lifetime || false);
       const info: KeyInfo = { 
         status: 'Valid', 
         duration,
-        expiresAt: useResult.expires_at,
-        isLifetime: useResult.is_lifetime,
-        keyValue: useResult.key_value
+        expiresAt: useResult.expires_at || null,
+        isLifetime: useResult.is_lifetime || false,
+        keyValue: useResult.key_value || ''
       };
       setKeyInfo({ status: 'Valid', duration });
       toast.success('Key activated successfully!');
