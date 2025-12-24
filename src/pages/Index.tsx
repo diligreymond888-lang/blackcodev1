@@ -7,10 +7,20 @@ import CodmChecker from '@/components/CodmChecker';
 import BroadcastDisplay from '@/components/BroadcastDisplay';
 import { toast } from 'sonner';
 
+const STORAGE_KEY = 'codm_checker_session';
+
+interface StoredSession {
+  keyValue: string;
+  expiresAt: string | null;
+  isLifetime: boolean;
+  activatedAt: string;
+}
+
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
   const [displayDuration, setDisplayDuration] = useState<string>('');
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
 
   const calculateDuration = useCallback((expiresAt: string | null, isLifetime: boolean): string => {
     if (isLifetime) {
@@ -45,10 +55,76 @@ const Index = () => {
     }
   }, []);
 
+  // Save session to localStorage
+  const saveSession = useCallback((info: KeyInfo) => {
+    const session: StoredSession = {
+      keyValue: info.keyValue,
+      expiresAt: info.expiresAt,
+      isLifetime: info.isLifetime,
+      activatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  }, []);
+
+  // Clear session from localStorage
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+  }, []);
+
+  // Check if stored session is still valid
+  const checkStoredSession = useCallback(async () => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (!stored) {
+        setIsCheckingSession(false);
+        return;
+      }
+
+      const session: StoredSession = JSON.parse(stored);
+      
+      // Check if key has expired (for non-lifetime keys)
+      if (!session.isLifetime && session.expiresAt) {
+        const expiry = new Date(session.expiresAt);
+        if (expiry <= new Date()) {
+          // Key expired, clear session
+          clearSession();
+          toast.error('Your key has expired. Please enter a new key.');
+          setIsCheckingSession(false);
+          return;
+        }
+      }
+
+      // Session is valid, restore it
+      const info: KeyInfo = {
+        status: 'Valid',
+        duration: calculateDuration(session.expiresAt, session.isLifetime),
+        expiresAt: session.expiresAt,
+        isLifetime: session.isLifetime,
+        keyValue: session.keyValue,
+      };
+      
+      setKeyInfo(info);
+      setDisplayDuration(info.duration);
+      setIsAuthenticated(true);
+      toast.success('Session restored!');
+    } catch (error) {
+      console.error('Error restoring session:', error);
+      clearSession();
+    } finally {
+      setIsCheckingSession(false);
+    }
+  }, [calculateDuration, clearSession]);
+
+  // Check for stored session on mount
+  useEffect(() => {
+    checkStoredSession();
+  }, [checkStoredSession]);
+
   const handleValidKey = (info: KeyInfo) => {
     setKeyInfo(info);
     setDisplayDuration(info.duration);
     setIsAuthenticated(true);
+    saveSession(info); // Save to localStorage
   };
 
   const handleKeyExpired = useCallback(() => {
@@ -56,7 +132,8 @@ const Index = () => {
     setIsAuthenticated(false);
     setKeyInfo(null);
     setDisplayDuration('');
-  }, []);
+    clearSession(); // Clear from localStorage
+  }, [clearSession]);
 
   // Monitor key expiry
   useEffect(() => {
@@ -119,7 +196,12 @@ const Index = () => {
             <BroadcastDisplay />
           </section>
 
-          {!isAuthenticated ? (
+          {isCheckingSession ? (
+            <section className="flex flex-col items-center justify-center py-12">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-muted-foreground text-sm">Checking session...</p>
+            </section>
+          ) : !isAuthenticated ? (
             <>
               {/* Key Input */}
               <section>
