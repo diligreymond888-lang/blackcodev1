@@ -4,6 +4,7 @@ import KeyInput, { KeyInfo } from '@/components/KeyInput';
 import PricingTable from '@/components/PricingTable';
 import ActionButtons from '@/components/ActionButtons';
 import CodmChecker from '@/components/CodmChecker';
+import BroadcastDisplay from '@/components/BroadcastDisplay';
 import { toast } from 'sonner';
 
 const Index = () => {
@@ -112,6 +113,11 @@ const Index = () => {
               powered by <span className="text-foreground">@BlackCodeHat</span>
             </p>
           </header>
+
+          {/* Broadcasts Section */}
+          <section className="w-full">
+            <BroadcastDisplay />
+          </section>
 
           {!isAuthenticated ? (
             <>
