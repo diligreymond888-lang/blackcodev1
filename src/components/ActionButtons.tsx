@@ -1,4 +1,4 @@
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, ExternalLink } from 'lucide-react';
 
 const ActionButtons = () => {
   return (
@@ -7,12 +7,13 @@ const ActionButtons = () => {
         href="https://t.me/BlackCodeHat"
         target="_blank"
         rel="noopener noreferrer"
-        className="neon-button flex items-center gap-2 px-8 py-3 rounded-lg 
-                   font-display text-sm font-medium text-foreground
-                   hover:scale-105 active:scale-95 transition-transform"
+        className="neon-button flex items-center gap-2.5 px-8 py-3.5 rounded-xl 
+                   font-display text-sm font-semibold text-foreground
+                   group"
       >
         <ShoppingCart className="w-4 h-4" />
         Buy Key
+        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />
       </a>
     </div>
   );

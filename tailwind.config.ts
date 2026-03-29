@@ -16,6 +16,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         display: ['Orbitron', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -51,9 +52,13 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        cyan: {
-          DEFAULT: "hsl(180 100% 50%)",
-          glow: "hsl(180 100% 50% / 0.5)",
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
         },
       },
       borderRadius: {
@@ -80,18 +85,23 @@ export default {
           "0%, 100%": { opacity: "0.5" },
           "50%": { opacity: "1" },
         },
+        "fade-in": {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "float": "float linear infinite",
         "glow-pulse": "glow-pulse 2s ease-in-out infinite",
+        "fade-in": "fade-in 0.3s ease-out",
       },
       boxShadow: {
-        "glow-sm": "0 0 10px hsl(180 100% 50% / 0.3)",
-        "glow-md": "0 0 20px hsl(180 100% 50% / 0.4)",
-        "glow-lg": "0 0 30px hsl(180 100% 50% / 0.5), 0 0 60px hsl(180 100% 50% / 0.3)",
-        "glow-xl": "0 0 40px hsl(180 100% 50% / 0.6), 0 0 80px hsl(180 100% 50% / 0.4)",
+        "glow-sm": "0 0 8px hsl(270 100% 65% / 0.2)",
+        "glow-md": "0 0 16px hsl(270 100% 65% / 0.3)",
+        "glow-lg": "0 0 24px hsl(270 100% 65% / 0.4), 0 0 48px hsl(270 100% 65% / 0.2)",
+        "glow-xl": "0 0 32px hsl(270 100% 65% / 0.5), 0 0 64px hsl(270 100% 65% / 0.3)",
       },
     },
   },
