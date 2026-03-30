@@ -205,7 +205,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   };
 
   const getDownloadDescription = () => {
-    return `\n\n========================================\nModified by @BlackCodeHat\n\nTHANK YOU FOR USING\n========================================`;
+    return `\n\n========================================\nConfig by @Tanongmoto @BlackCodeHat\n\nTHANK YOU FOR USING\n========================================`;
   };
 
   const triggerDownload = (content: string, filename: string) => {
