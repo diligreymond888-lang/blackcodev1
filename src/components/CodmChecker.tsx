@@ -444,17 +444,61 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               const details = result.details || {};
               const codm = result.codm || {};
               
+              // Build detailed log matching v7.py output format
+              const cleanStatus = result.isClean ? 'CLEAN' : 'NOT CLEAN';
+              const emailVer = details.email_verified ? 'Verified' : 'Not Verified';
+              const mobileBound = details.mobile_bound || (details.mobile_no && details.mobile_no !== 'N/A' ? 'Yes' : 'No');
+              const fbLinked = details.facebook_linked || (details.facebook_connected ? 'Linked' : 'Not Linked');
+              const twoFA = details.two_step_verify ? 'Yes' : 'No';
+              const authApp = details.authenticator ? 'Yes' : 'No';
+              
+              // Detailed formatted log (for display)
+              const logLines = [
+                `═══════════════════════════════`,
+                `  LOGIN SUCCESSFUL`,
+                `  STATUS: ${cleanStatus}`,
+                `  USER:PASS: ${result.account}:${result.password}`,
+                details.last_login ? `  LAST LOGIN: ${details.last_login}` : null,
+                details.last_login_where ? `  LOCATION: ${details.last_login_where}` : null,
+                details.ip_address ? `  IP: ${details.ip_address}` : null,
+                `  SERVER: ${details.country || 'N/A'}`,
+                ``,
+                `  GAME INFO`,
+                result.hasCodm ? `  CODM Nickname: ${codm.codm_nickname || 'N/A'}` : `  CODM: No CODM`,
+                result.hasCodm ? `  CODM UID: ${codm.uid || 'N/A'}` : null,
+                result.hasCodm ? `  CODM Level: ${codm.codm_level || 'N/A'}` : null,
+                result.hasCodm ? `  CODM Region: ${codm.region || 'N/A'}` : null,
+                `  Shells: ${details.shell_balance || 0}`,
+                `  Mobile: ${details.mobile_no || 'N/A'}`,
+                `  Email: ${details.email || 'N/A'} (${emailVer})`,
+                ``,
+                `  BIND STATUS`,
+                `  Mobile Bound: ${mobileBound}`,
+                `  Email Verified: ${details.email_verified ? 'Yes' : 'No'}`,
+                `  Facebook: ${fbLinked}`,
+                details.facebook_profile && details.facebook_profile !== 'N/A' ? `  FB Profile: ${details.facebook_profile}` : null,
+                `  Authenticator: ${authApp}`,
+                `  2FA: ${twoFA}`,
+                `  Security: ${details.security_status || 'Normal'}`,
+                `═══════════════════════════════`,
+              ].filter(Boolean).join('\n');
+              
+              // Short format for results file
               formattedLog = [
-                `Account: ${result.account}`,
-                `Password: ${result.password}`,
-                `Nickname: ${details.nickname || 'N/A'}`,
+                `Account: ${result.account}:${result.password}`,
                 `UID: ${details.uid || 'N/A'}`,
-                `Email: ${details.email || 'N/A'}`,
+                `Nickname: ${details.nickname || 'N/A'}`,
+                `Email: ${details.email || 'N/A'} (${emailVer})`,
+                `Mobile: ${details.mobile_no || 'N/A'}`,
                 `Country: ${details.country || 'N/A'}`,
                 `Shell: ${details.shell_balance || 0}`,
                 `Bind: ${details.bind_status || 'N/A'}`,
-                result.hasCodm ? `CODM: ${codm.codm_nickname} (Lv.${codm.codm_level})` : 'CODM: No',
-                `Status: ${result.isClean ? 'CLEAN' : 'NOT CLEAN'}`
+                `Security: ${details.security_status || 'Normal'}`,
+                `FB: ${fbLinked}`,
+                `2FA: ${twoFA}`,
+                `Auth: ${authApp}`,
+                result.hasCodm ? `CODM: ${codm.codm_nickname || 'N/A'} (Lv.${codm.codm_level || '?'}) Region:${codm.region || 'N/A'}` : 'CODM: No',
+                `Status: ${cleanStatus}`
               ].join(' | ');
               
               if (result.hasCodm) {
@@ -471,22 +515,27 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               setStats(prev => ({ ...prev, valid: prev.valid + 1 }));
               tempResults.valid.push(formattedLog);
               
+              // Log detailed view line by line
+              logLines.split('\n').forEach(line => {
+                if (line.trim()) addLog(line, logType);
+              });
+              
             } else if (result.status === 'invalid') {
               formattedLog = `Account: ${result.account || 'Unknown'} | Status: INVALID | ${result.message || 'Login failed'}`;
               logType = 'invalid';
               statKey = 'invalid';
+              addLog(`[INVALID] ${formattedLog}`, logType);
             } else {
               formattedLog = `Account: ${result.account || 'Unknown'} | Status: ERROR | ${result.message || 'Unknown error'}`;
               logType = 'invalid';
               statKey = 'invalid';
+              addLog(`[ERROR] ${formattedLog}`, logType);
             }
             
             if (statKey) {
               tempResults[statKey].push(formattedLog);
               setStats(prev => ({ ...prev, [statKey]: prev[statKey] + 1 }));
             }
-            
-            addLog(`[${(statKey || 'info').toUpperCase()}] ${formattedLog}`, logType);
           }
         } catch (err) {
           addLog(`❌ Error checking account: ${err}`, 'invalid');
