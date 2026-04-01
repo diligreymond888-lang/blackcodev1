@@ -153,7 +153,29 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const content = event.target?.result as string;
-        let lines = content.split('\n').filter(line => line.trim() !== '');
+        const rawLines = content.split('\n').filter(line => line.trim() !== '');
+        
+        // Filter: only keep lines that look like account:password
+        // Skip decorative lines with emojis, unicode fancy text, headers, etc.
+        let lines = rawLines.filter(line => {
+          const trimmed = line.trim();
+          // Skip lines with emojis or non-ASCII decorative chars
+          if (/[^\x20-\x7E]/.test(trimmed)) return false;
+          // Skip lines starting with # or // (comments)
+          if (trimmed.startsWith('#') || trimmed.startsWith('//')) return false;
+          // Skip blank or separator-only lines
+          if (/^[=\-_*~|+]+$/.test(trimmed)) return false;
+          // Must have account:password format (at least 2 parts with colon)
+          const parts = trimmed.split(':');
+          if (parts.length < 2) return false;
+          const account = parts[0].trim();
+          const password = parts.slice(1).join(':').trim();
+          // Account must be at least 3 chars, password at least 1
+          if (account.length < 3 || password.length < 1) return false;
+          // Account should look like a username or email
+          if (!/^[a-zA-Z0-9._@+-]+$/.test(account)) return false;
+          return true;
+        });
         
         // Security: limit lines
         if (lines.length > MAX_LINES) {
@@ -161,8 +183,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
           lines = lines.slice(0, MAX_LINES);
         }
         
+        const skipped = rawLines.length - lines.length;
         setFileLines(lines);
-        addLog(`Loaded ${lines.length} lines from file`, 'info');
+        addLog(`Loaded ${lines.length} valid accounts${skipped > 0 ? ` (${skipped} non-account lines skipped)` : ''}`, 'info');
       };
       reader.readAsText(selectedFile);
     }
