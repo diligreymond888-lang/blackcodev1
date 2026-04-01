@@ -192,10 +192,10 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   };
 
   const addLog = (message: string, type: LogEntry['type']) => {
-    logIdRef.current += 1;
+    const newId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     setLogs(prev => {
       // Keep max 500 log entries for performance
-      const newLogs = [...prev, { id: logIdRef.current, message, type }];
+      const newLogs = [...prev, { id: newId, message, type }];
       return newLogs.length > 500 ? newLogs.slice(-500) : newLogs;
     });
     setTimeout(() => {
