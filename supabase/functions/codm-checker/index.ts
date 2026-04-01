@@ -1380,9 +1380,17 @@ async function checkAccount(account: string, password: string): Promise<Record<s
     }
     
     try {
-      // Step 1: Get fresh DataDome cookie
-      const datadome = get_cookies();
-      // Cookie always available from pool
+      // Step 1: Get DataDome cookie - try pool first, then fresh fetch
+      let datadome = get_cookies();
+      
+      // On later retries, try fetching a fresh cookie
+      if (attempt >= 2) {
+        console.log('[CHECK] Trying fresh DataDome cookie fetch...');
+        const freshCookie = await fetchFreshDataDomeCookie();
+        if (freshCookie) {
+          datadome = freshCookie;
+        }
+      }
       
       // Step 2: Prelogin with internal retry on 403
       const preloginResult = await prelogin(account, datadome);
