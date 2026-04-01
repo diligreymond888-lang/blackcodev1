@@ -68,6 +68,7 @@ const Index = () => {
 
       const session: StoredSession = JSON.parse(stored);
       
+      // Check local expiry first
       if (!session.isLifetime && session.expiresAt) {
         const expiry = new Date(session.expiresAt);
         if (expiry <= new Date()) {
@@ -76,6 +77,25 @@ const Index = () => {
           setIsCheckingSession(false);
           return;
         }
+      }
+
+      // Re-validate key against database (handles deleted/deactivated keys)
+      try {
+        const { data: validationData } = await supabase
+          .rpc('validate_access_key', { p_key_value: session.keyValue });
+        const result = validationData as { valid: boolean; reason?: string } | null;
+        
+        // If key was deleted, deactivated, or otherwise invalid - clear session
+        // Note: used keys are valid for the current session holder
+        if (!result || (!result.valid && result.reason !== 'used')) {
+          clearSession();
+          toast.error('Your key is no longer valid. Please enter a new key.');
+          setIsCheckingSession(false);
+          return;
+        }
+      } catch (dbError) {
+        console.error('Error re-validating key:', dbError);
+        // On network error, allow session to continue with local check
       }
 
       const info: KeyInfo = {
