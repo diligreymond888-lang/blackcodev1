@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import ParticleBackground from '@/components/ParticleBackground';
 import KeyInput, { KeyInfo } from '@/components/KeyInput';
 import PricingTable from '@/components/PricingTable';
