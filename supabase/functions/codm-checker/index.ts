@@ -829,7 +829,8 @@ async function prelogin(account: string, datadome: string): Promise<{ v1: string
       }
       
       if (response.status === 403) {
-        console.log('[PRELOGIN] 403 - DataDome blocked');
+        console.log('[PRELOGIN] 403 - DataDome blocked, banning cookie');
+        ban_current_cookie();
         if (newDatadome && attempt < retries - 1) {
           console.log('[PRELOGIN] Retrying with new cookies from 403...');
           await new Promise(resolve => setTimeout(resolve, 100));
