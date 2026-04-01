@@ -126,7 +126,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     accountIndex: 0,
     totalAccounts: 0,
   });
-  const logIdRef = useRef(0);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const shouldStopRef = useRef(false);
