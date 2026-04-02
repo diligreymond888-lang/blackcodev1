@@ -902,15 +902,18 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         )}
       </div>
 
-      {/* Retry Indicator */}
+      {/* Cookie Status & Retry Indicator */}
       {mode === 'checker' && (
-        <RetryIndicator
-          currentRetry={retryState.currentRetry}
-          maxRetries={retryState.maxRetries}
-          isRetrying={retryState.isRetrying}
-          accountIndex={retryState.accountIndex}
-          totalAccounts={retryState.totalAccounts}
-        />
+        <>
+          <CookieStatusIndicator />
+          <RetryIndicator
+            currentRetry={retryState.currentRetry}
+            maxRetries={retryState.maxRetries}
+            isRetrying={retryState.isRetrying}
+            accountIndex={retryState.accountIndex}
+            totalAccounts={retryState.totalAccounts}
+          />
+        </>
       )}
 
       {/* Main Content Area */}
