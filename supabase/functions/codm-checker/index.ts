@@ -1555,6 +1555,17 @@ function validateAccountInput(accounts: unknown): ValidationResult {
   };
 }
 
+
+// Get cookie pool status
+function getCookiePoolStatus(): { total: number; banned: number; available: number; currentIndex: number } {
+  return {
+    total: COOKIE_POOL.length,
+    banned: bannedCookies.size,
+    available: COOKIE_POOL.length - bannedCookies.size,
+    currentIndex: cookieIndex
+  };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -1580,7 +1591,18 @@ serve(async (req) => {
       );
     }
 
-    const { accounts } = await req.json();
+    const body = await req.json();
+    
+    // Handle cookie_status action
+    if (body.action === 'cookie_status') {
+      const status = getCookiePoolStatus();
+      return new Response(
+        JSON.stringify(status),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { accounts } = body;
 
     const validation = validateAccountInput(accounts);
     if (!validation.valid) {

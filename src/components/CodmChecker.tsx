@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useAntiDDoSContext } from './AntiDDoSProvider';
 import RetryIndicator from './RetryIndicator';
 import ProgressHeader from './ProgressHeader';
+import CookieStatusIndicator from './CookieStatusIndicator';
 
 type Mode = 'checker' | 'searcher' | 'bomber' | 'booster' | 'remover';
 interface KeyInfo {
@@ -901,15 +902,18 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         )}
       </div>
 
-      {/* Retry Indicator */}
+      {/* Cookie Status & Retry Indicator */}
       {mode === 'checker' && (
-        <RetryIndicator
-          currentRetry={retryState.currentRetry}
-          maxRetries={retryState.maxRetries}
-          isRetrying={retryState.isRetrying}
-          accountIndex={retryState.accountIndex}
-          totalAccounts={retryState.totalAccounts}
-        />
+        <>
+          <CookieStatusIndicator />
+          <RetryIndicator
+            currentRetry={retryState.currentRetry}
+            maxRetries={retryState.maxRetries}
+            isRetrying={retryState.isRetrying}
+            accountIndex={retryState.accountIndex}
+            totalAccounts={retryState.totalAccounts}
+          />
+        </>
       )}
 
       {/* Main Content Area */}
