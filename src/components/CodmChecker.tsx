@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useAntiDDoSContext } from './AntiDDoSProvider';
 import RetryIndicator from './RetryIndicator';
 import ProgressHeader from './ProgressHeader';
+import CookieStatusIndicator from './CookieStatusIndicator';
 
 type Mode = 'checker' | 'searcher' | 'bomber' | 'booster' | 'remover';
 interface KeyInfo {
