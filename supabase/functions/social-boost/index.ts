@@ -60,6 +60,12 @@ function translateMessage(message: string): string {
     [/Lien non valide/gi, "Invalid link"],
     [/Profil non trouv[ée]/gi, "Profile not found"],
     [/Compte priv[ée]/gi, "Private account"],
+    [/Service temporairement indisponible/gi, "Service temporarily unavailable"],
+    [/temporairement/gi, "temporarily"],
+    [/indisponible/gi, "unavailable"],
+    [/Impossible/gi, "Unable"],
+    [/La vid[ée]o n'existe pas/gi, "Video does not exist"],
+    [/Le profil n'existe pas/gi, "Profile does not exist"],
   ];
 
   let translated = message;
