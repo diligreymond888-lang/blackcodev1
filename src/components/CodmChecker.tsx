@@ -39,12 +39,30 @@ interface BomberStats {
   iterations: number;
 }
 
-type BoostType = 'tiktok_views' | 'tiktok_likes' | 'tiktok_followers' | 'telegram_views' | 'facebook_shares';
+interface DiscordUserInfo {
+  id: string;
+  username: string;
+  discriminator: string;
+  global_name: string | null;
+  avatar_url: string | null;
+  banner_url: string | null;
+  accent_color: number | null;
+  is_bot: boolean;
+  is_system: boolean;
+  created_at: string;
+  flags: string[];
+  banner_color: string | null;
+}
 
-interface BoosterStats {
-  success: number;
-  fail: number;
-  total: number;
+interface DiscordMemberInfo {
+  nick: string | null;
+  joined_at: string | null;
+  roles_count: number;
+  premium_since: string | null;
+  is_muted: boolean;
+  is_deafened: boolean;
+  pending: boolean;
+  communication_disabled_until: string | null;
 }
 
 interface RemoverStats {
