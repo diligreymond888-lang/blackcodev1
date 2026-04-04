@@ -873,7 +873,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     { mode: 'checker' as Mode, label: 'CODM Checker', icon: Play, shortLabel: 'Checker' },
     { mode: 'searcher' as Mode, label: 'Searcher Domain', icon: Search, shortLabel: 'Searcher' },
     { mode: 'bomber' as Mode, label: 'SMS Bomber', icon: Zap, shortLabel: 'Bomber' },
-    { mode: 'booster' as Mode, label: 'Social Boost', icon: Rocket, shortLabel: 'Booster' },
+    { mode: 'discord' as Mode, label: 'Discord Checker', icon: UserSearch, shortLabel: 'Discord' },
     { mode: 'remover' as Mode, label: 'URL Remover', icon: Link2Off, shortLabel: 'Remover' },
   ];
 
