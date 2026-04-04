@@ -1025,51 +1025,80 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               </button>
             </div>
           </div>
-        ) : mode === 'booster' ? (
+        ) : mode === 'discord' ? (
           <div className="space-y-4">
             <div className="neon-border rounded-xl glass-panel px-4 py-4">
-              <label className="text-muted-foreground text-xs font-medium block mb-2">URL to Boost</label>
+              <label className="text-muted-foreground text-xs font-medium block mb-2">Discord User ID</label>
               <div className="flex items-center gap-3">
-                <TrendingUp className="w-5 h-5 text-primary shrink-0" />
-                <input type="url" value={boostUrl}
-                  onChange={(e) => setBoostUrl(e.target.value.slice(0, MAX_URL_LENGTH))}
-                  placeholder="https://tiktok.com/... or t.me/..."
+                <UserSearch className="w-5 h-5 text-primary shrink-0" />
+                <input type="text" value={discordUserId}
+                  onChange={(e) => setDiscordUserId(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                  placeholder="Enter User ID (e.g. 123456789012345678)"
                   className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/50 focus:outline-none font-mono text-sm"
                   disabled={isRunning} />
               </div>
             </div>
             <div className="neon-border rounded-xl glass-panel px-4 py-4">
-              <label className="text-muted-foreground text-xs font-medium block mb-3">Boost Type</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {([
-                  { type: 'tiktok_views' as BoostType, label: 'TikTok Views', icon: Eye, color: 'text-pink-400' },
-                  { type: 'tiktok_likes' as BoostType, label: 'TikTok Likes', icon: Heart, color: 'text-red-400' },
-                  { type: 'tiktok_followers' as BoostType, label: 'TikTok Followers', icon: Users, color: 'text-blue-400' },
-                  { type: 'telegram_views' as BoostType, label: 'Telegram Views', icon: Eye, color: 'text-sky-400' },
-                  { type: 'facebook_shares' as BoostType, label: 'FB Shares', icon: Share2, color: 'text-blue-600' },
-                ]).map((boost) => (
-                  <button key={boost.type} onClick={() => setSelectedBoostType(boost.type)} disabled={isRunning}
-                    className={`py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5
-                      ${selectedBoostType === boost.type 
-                        ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' 
-                        : 'bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground'
-                      } disabled:opacity-50`}>
-                    <boost.icon className={`w-3.5 h-3.5 ${selectedBoostType === boost.type ? '' : boost.color}`} />
-                    <span className="truncate">{boost.label}</span>
-                  </button>
-                ))}
+              <label className="text-muted-foreground text-xs font-medium block mb-2">Guild ID <span className="text-muted-foreground/50">(optional)</span></label>
+              <div className="flex items-center gap-3">
+                <Shield className="w-5 h-5 text-primary/60 shrink-0" />
+                <input type="text" value={discordGuildId}
+                  onChange={(e) => setDiscordGuildId(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                  placeholder="Enter Guild ID for member info"
+                  className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/50 focus:outline-none font-mono text-sm"
+                  disabled={isRunning} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <button onClick={handleStart} disabled={isRunning || !boostUrl.trim()}
+
+            {/* Discord Result Card */}
+            {discordResult?.user && (
+              <div className="neon-border rounded-xl glass-panel px-4 py-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  {discordResult.user.avatar_url && (
+                    <img src={discordResult.user.avatar_url} alt="Avatar" className="w-12 h-12 rounded-full border-2 border-primary/30" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-foreground font-bold text-sm truncate">{discordResult.user.global_name || discordResult.user.username}</p>
+                    <p className="text-muted-foreground text-xs font-mono">@{discordResult.user.username}</p>
+                    <p className="text-muted-foreground/60 text-[10px] font-mono">{discordResult.user.id}</p>
+                  </div>
+                  {discordResult.user.is_bot && (
+                    <span className="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full">BOT</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-secondary/30 rounded-lg p-2">
+                    <p className="text-muted-foreground text-[10px]">Created</p>
+                    <p className="text-foreground font-mono">{new Date(discordResult.user.created_at).toLocaleDateString()}</p>
+                  </div>
+                  {discordResult.user.flags.length > 0 && (
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Badges</p>
+                      <p className="text-foreground font-mono text-[10px]">{discordResult.user.flags.join(', ')}</p>
+                    </div>
+                  )}
+                  {discordResult.member && (
+                    <>
+                      <div className="bg-secondary/30 rounded-lg p-2">
+                        <p className="text-muted-foreground text-[10px]">Joined Guild</p>
+                        <p className="text-foreground font-mono">{discordResult.member.joined_at ? new Date(discordResult.member.joined_at).toLocaleDateString() : 'N/A'}</p>
+                      </div>
+                      <div className="bg-secondary/30 rounded-lg p-2">
+                        <p className="text-muted-foreground text-[10px]">Roles</p>
+                        <p className="text-foreground font-mono">{discordResult.member.roles_count}</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button onClick={handleStart} disabled={isRunning || !discordUserId.trim()}
                 className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
                            disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                <Rocket className="w-4 h-4" /> Boost
-              </button>
-              <button onClick={handleStop} disabled={!isRunning}
-                className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
-                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                <Square className="w-4 h-4" /> Stop
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserSearch className="w-4 h-4" />}
+                {isProcessing ? 'Checking...' : 'Check'}
               </button>
               <button onClick={handleRefresh} disabled={isRunning}
                 className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
