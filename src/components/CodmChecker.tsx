@@ -228,7 +228,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setStats({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
     setBomberStats({ success: 0, fail: 0, total: 0, iterations: 0 });
-    setBoosterStats({ success: 0, fail: 0, total: 0 });
+    setDiscordResult(null);
     setRemoverStats({ urlsRemoved: 0, linesProcessed: 0, totalLines: 0 });
     setCleanedContent([]);
     setLogs([]);
