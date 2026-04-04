@@ -365,13 +365,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setIsProcessing(true);
     setCurrentProcessingIndex(0);
     
-    const modeNames = { checker: 'checker', searcher: 'searcher', bomber: 'SMS bomber', booster: 'social boost', remover: 'URL remover' };
+    const modeNames = { checker: 'checker', searcher: 'searcher', bomber: 'SMS bomber', discord: 'Discord checker', remover: 'URL remover' };
     addLog(`Starting ${modeNames[mode]}...`, 'info');
     
     if (mode === 'checker') await processChecking();
     else if (mode === 'searcher') simulateSearching();
     else if (mode === 'bomber') await processBombing();
-    else if (mode === 'booster') await processBoosting();
+    else if (mode === 'discord') await processDiscordCheck();
     else if (mode === 'remover') processRemovingUrls();
     
     setIsProcessing(false);
