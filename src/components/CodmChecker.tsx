@@ -348,9 +348,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         return;
       }
     }
-    if (mode === 'booster') {
-      if (!boostUrl.trim() || !validateUrl(boostUrl.trim())) {
-        toast.error('Please enter a valid URL (https://...)!');
+    if (mode === 'discord') {
+      if (!discordUserId.trim() || !/^\d{17,20}$/.test(discordUserId.trim())) {
+        toast.error('Please enter a valid Discord User ID (17-20 digits)!');
         return;
       }
     }
