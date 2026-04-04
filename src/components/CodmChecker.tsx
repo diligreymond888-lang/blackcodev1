@@ -743,30 +743,55 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         
         addLog(`═══════════════════════════════`, 'success');
         addLog(`  DISCORD USER FOUND`, 'success');
-        addLog(`  Username: ${user.username}`, 'success');
-        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'success');
-        addLog(`  ID: ${user.id}`, 'info');
-        addLog(`  Bot: ${user.is_bot ? 'Yes' : 'No'}`, 'info');
-        addLog(`  Created: ${new Date(user.created_at).toLocaleDateString()}`, 'info');
-        if (user.flags.length > 0) addLog(`  Badges: ${user.flags.join(', ')}`, 'info');
-        if (user.avatar_url) addLog(`  Avatar: ${user.avatar_url}`, 'info');
-        if (user.banner_url) addLog(`  Banner: ${user.banner_url}`, 'info');
+        addLog(`═══════════════════════════════`, 'success');
+        addLog(``, 'info');
+        addLog(`  BASIC INFO`, 'success');
+        addLog(`  Username: ${user.username}`, 'info');
+        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'info');
+        addLog(`  User ID: ${user.id}`, 'info');
+        addLog(`  Discriminator: #${user.discriminator}`, 'info');
+        addLog(`  Bot Account: ${user.is_bot ? 'Yes' : 'No'}`, user.is_bot ? 'retry' : 'info');
+        addLog(`  System Account: ${user.is_system ? 'Yes' : 'No'}`, 'info');
+        addLog(``, 'info');
+        addLog(`  ACCOUNT DETAILS`, 'success');
+        addLog(`  Created: ${new Date(user.created_at).toLocaleString()}`, 'info');
+        const premiumLabels: Record<number, string> = { 0: 'None', 1: 'Nitro Classic', 2: 'Nitro', 3: 'Nitro Basic' };
+        addLog(`  Nitro: ${premiumLabels[user.premium_type] || 'Unknown'}`, user.premium_type > 0 ? 'hasCodm' : 'info');
+        addLog(``, 'info');
+        addLog(`  PROFILE`, 'success');
+        addLog(`  Avatar: ${user.avatar || 'Default'}${user.has_animated_avatar ? ' (Animated)' : ''}`, 'info');
+        if (user.avatar_url) addLog(`  Avatar URL: ${user.avatar_url}`, 'info');
+        if (user.avatar_decoration) addLog(`  Avatar Decoration: Yes`, 'hasCodm');
+        addLog(`  Banner: ${user.banner ? 'Custom' : 'None'}${user.has_animated_banner ? ' (Animated)' : ''}`, 'info');
+        if (user.banner_url) addLog(`  Banner URL: ${user.banner_url}`, 'info');
+        if (user.accent_color) addLog(`  Accent Color: ${user.accent_color}`, 'info');
+        if (user.banner_color) addLog(`  Banner Color: ${user.banner_color}`, 'info');
+        addLog(``, 'info');
+        if (user.flags.length > 0) {
+          addLog(`  BADGES (${user.flags.length})`, 'success');
+          user.flags.forEach(flag => addLog(`  ⭐ ${flag}`, 'hasCodm'));
+          addLog(``, 'info');
+        }
         
         if (data.member) {
           const member = data.member as DiscordMemberInfo;
-          addLog(``, 'info');
           addLog(`  GUILD MEMBER INFO`, 'success');
-          if (member.nick) addLog(`  Nickname: ${member.nick}`, 'info');
-          if (member.joined_at) addLog(`  Joined: ${new Date(member.joined_at).toLocaleDateString()}`, 'info');
+          if (member.nick) addLog(`  Server Nickname: ${member.nick}`, 'info');
+          if (member.joined_at) addLog(`  Joined Server: ${new Date(member.joined_at).toLocaleString()}`, 'info');
           addLog(`  Roles: ${member.roles_count}`, 'info');
-          if (member.premium_since) addLog(`  Boosting Since: ${new Date(member.premium_since).toLocaleDateString()}`, 'info');
-          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${member.communication_disabled_until}`, 'fail');
+          addLog(`  Server Muted: ${member.is_muted ? 'Yes' : 'No'}`, member.is_muted ? 'fail' : 'info');
+          addLog(`  Server Deafened: ${member.is_deafened ? 'Yes' : 'No'}`, member.is_deafened ? 'fail' : 'info');
+          addLog(`  Pending Verification: ${member.pending ? 'Yes' : 'No'}`, member.pending ? 'retry' : 'info');
+          if (member.premium_since) addLog(`  Server Boosting Since: ${new Date(member.premium_since).toLocaleString()}`, 'hasCodm');
+          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${new Date(member.communication_disabled_until).toLocaleString()}`, 'fail');
+          addLog(``, 'info');
         } else if (data.member_error) {
-          addLog(`  Guild: ${data.member_error}`, 'fail');
+          addLog(`  Guild Info: ${data.member_error}`, 'fail');
+          addLog(``, 'info');
         }
         
         addLog(`═══════════════════════════════`, 'success');
-        toast.success(`Found user: ${user.username}`);
+        toast.success(`Found user: ${user.global_name || user.username}`);
       } else {
         addLog(`✗ ${data?.error || 'User not found'}`, 'fail');
         toast.error(data?.error || 'User not found');
