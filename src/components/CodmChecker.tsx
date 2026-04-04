@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield, Rocket, TrendingUp, Heart, Users, Eye, Share2, Link2Off, X } from 'lucide-react';
+import { Play, Pause, Square, Upload, Search, Menu, Download, RefreshCw, Loader2, Phone, Zap, Shield, UserSearch, Link2Off, X } from 'lucide-react';
 import { getRandomUniqueEntries } from '@/data/garenaStock';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -8,7 +8,7 @@ import RetryIndicator from './RetryIndicator';
 import ProgressHeader from './ProgressHeader';
 import CookieStatusIndicator from './CookieStatusIndicator';
 
-type Mode = 'checker' | 'searcher' | 'bomber' | 'booster' | 'remover';
+type Mode = 'checker' | 'searcher' | 'bomber' | 'discord' | 'remover';
 interface KeyInfo {
   status: string;
   duration: string;
@@ -39,12 +39,30 @@ interface BomberStats {
   iterations: number;
 }
 
-type BoostType = 'tiktok_views' | 'tiktok_likes' | 'tiktok_followers' | 'telegram_views' | 'facebook_shares';
+interface DiscordUserInfo {
+  id: string;
+  username: string;
+  discriminator: string;
+  global_name: string | null;
+  avatar_url: string | null;
+  banner_url: string | null;
+  accent_color: number | null;
+  is_bot: boolean;
+  is_system: boolean;
+  created_at: string;
+  flags: string[];
+  banner_color: string | null;
+}
 
-interface BoosterStats {
-  success: number;
-  fail: number;
-  total: number;
+interface DiscordMemberInfo {
+  nick: string | null;
+  joined_at: string | null;
+  roles_count: number;
+  premium_since: string | null;
+  is_muted: boolean;
+  is_deafened: boolean;
+  pending: boolean;
+  communication_disabled_until: string | null;
 }
 
 interface RemoverStats {
@@ -99,9 +117,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const [selectedDomain, setSelectedDomain] = useState(true);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [bomberIterations, setBomberIterations] = useState(5);
-  const [boostUrl, setBoostUrl] = useState('');
-  const [selectedBoostType, setSelectedBoostType] = useState<BoostType>('tiktok_views');
-  const [boosterStats, setBoosterStats] = useState<BoosterStats>({ success: 0, fail: 0, total: 0 });
+  const [discordUserId, setDiscordUserId] = useState('');
+  const [discordGuildId, setDiscordGuildId] = useState('');
+  const [discordResult, setDiscordResult] = useState<{ user?: DiscordUserInfo; member?: DiscordMemberInfo; member_error?: string } | null>(null);
   const [removerStats, setRemoverStats] = useState<RemoverStats>({ urlsRemoved: 0, linesProcessed: 0, totalLines: 0 });
   const [cleanedContent, setCleanedContent] = useState<string[]>([]);
   const [stats, setStats] = useState<Stats>({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
@@ -210,7 +228,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setStats({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
     setSearcherStats({ found: 0, notFound: 0, total: 0 });
     setBomberStats({ success: 0, fail: 0, total: 0, iterations: 0 });
-    setBoosterStats({ success: 0, fail: 0, total: 0 });
+    setDiscordResult(null);
     setRemoverStats({ urlsRemoved: 0, linesProcessed: 0, totalLines: 0 });
     setCleanedContent([]);
     setLogs([]);
@@ -224,7 +242,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const handleRefresh = () => {
     resetStats();
     setPhoneNumber('');
-    setBoostUrl('');
+    setDiscordUserId('');
+    setDiscordGuildId('');
     addLog('Ready...', 'info');
   };
 
@@ -286,12 +305,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     resetStats();
     setFile(null);
     setPhoneNumber('');
-    setBoostUrl('');
+    setDiscordUserId('');
+    setDiscordGuildId('');
     const modeNames = {
       checker: 'CODM Checker',
       searcher: 'Searcher Domain',
       bomber: 'SMS Bomber',
-      booster: 'Social Boost',
+      discord: 'Discord Checker',
       remover: 'URL Remover'
     };
     addLog(`Switched to ${modeNames[newMode]} mode`, 'info');
@@ -328,9 +348,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         return;
       }
     }
-    if (mode === 'booster') {
-      if (!boostUrl.trim() || !validateUrl(boostUrl.trim())) {
-        toast.error('Please enter a valid URL (https://...)!');
+    if (mode === 'discord') {
+      if (!discordUserId.trim() || !/^\d{17,20}$/.test(discordUserId.trim())) {
+        toast.error('Please enter a valid Discord User ID (17-20 digits)!');
         return;
       }
     }
@@ -345,13 +365,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     setIsProcessing(true);
     setCurrentProcessingIndex(0);
     
-    const modeNames = { checker: 'checker', searcher: 'searcher', bomber: 'SMS bomber', booster: 'social boost', remover: 'URL remover' };
+    const modeNames = { checker: 'checker', searcher: 'searcher', bomber: 'SMS bomber', discord: 'Discord checker', remover: 'URL remover' };
     addLog(`Starting ${modeNames[mode]}...`, 'info');
     
     if (mode === 'checker') await processChecking();
     else if (mode === 'searcher') simulateSearching();
     else if (mode === 'bomber') await processBombing();
-    else if (mode === 'booster') await processBoosting();
+    else if (mode === 'discord') await processDiscordCheck();
     else if (mode === 'remover') processRemovingUrls();
     
     setIsProcessing(false);
@@ -688,19 +708,12 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     }
   };
 
-  const processBoosting = async () => {
-    const cleanUrl = sanitizeInput(boostUrl.trim());
+  const processDiscordCheck = async () => {
+    const cleanUserId = sanitizeInput(discordUserId.trim());
+    const cleanGuildId = discordGuildId.trim() ? sanitizeInput(discordGuildId.trim()) : undefined;
 
-    const boostTypeLabels: Record<BoostType, string> = {
-      tiktok_views: 'TikTok Views',
-      tiktok_likes: 'TikTok Likes',
-      tiktok_followers: 'TikTok Followers',
-      telegram_views: 'Telegram Views',
-      facebook_shares: 'Facebook Shares',
-    };
-
-    addLog(`Boosting: ${boostTypeLabels[selectedBoostType]}`, 'info');
-    addLog(`URL: ${cleanUrl}`, 'info');
+    addLog(`Checking Discord User ID: ${cleanUserId}`, 'info');
+    if (cleanGuildId) addLog(`Guild ID: ${cleanGuildId}`, 'info');
 
     try {
       if (!checkRateLimitLocal()) {
@@ -708,33 +721,54 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         await new Promise(resolve => setTimeout(resolve, 30000));
       }
 
-      addLog('Sending boost request...', 'info');
+      addLog('Fetching user data from Discord API...', 'info');
 
-      const { data, error } = await supabase.functions.invoke('social-boost', {
-        body: { action: selectedBoostType, url: cleanUrl }
+      const { data, error } = await supabase.functions.invoke('discord-checker', {
+        body: { user_id: cleanUserId, guild_id: cleanGuildId }
       });
 
       if (error) {
         addLog(`❌ Error: ${error.message}`, 'fail');
-        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
-        toast.error(`Boost failed: ${error.message}`);
-      } else if (data?.success) {
-        addLog(`✓ ${data.message}`, 'success');
-        if (data.orderId) addLog(`Order ID: ${data.orderId}`, 'info');
-        if (data.userInfo) addLog(`User: ${data.userInfo.nickname} (${data.userInfo.followers} followers)`, 'info');
-        setBoosterStats(prev => ({ ...prev, success: prev.success + 1, total: prev.total + 1 }));
-        toast.success(data.message);
+        toast.error(`Discord check failed: ${error.message}`);
+      } else if (data?.success && data?.user) {
+        const user = data.user as DiscordUserInfo;
+        setDiscordResult({ user, member: data.member, member_error: data.member_error });
+        
+        addLog(`═══════════════════════════════`, 'success');
+        addLog(`  DISCORD USER FOUND`, 'success');
+        addLog(`  Username: ${user.username}`, 'success');
+        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'success');
+        addLog(`  ID: ${user.id}`, 'info');
+        addLog(`  Bot: ${user.is_bot ? 'Yes' : 'No'}`, 'info');
+        addLog(`  Created: ${new Date(user.created_at).toLocaleDateString()}`, 'info');
+        if (user.flags.length > 0) addLog(`  Badges: ${user.flags.join(', ')}`, 'info');
+        if (user.avatar_url) addLog(`  Avatar: ${user.avatar_url}`, 'info');
+        if (user.banner_url) addLog(`  Banner: ${user.banner_url}`, 'info');
+        
+        if (data.member) {
+          const member = data.member as DiscordMemberInfo;
+          addLog(``, 'info');
+          addLog(`  GUILD MEMBER INFO`, 'success');
+          if (member.nick) addLog(`  Nickname: ${member.nick}`, 'info');
+          if (member.joined_at) addLog(`  Joined: ${new Date(member.joined_at).toLocaleDateString()}`, 'info');
+          addLog(`  Roles: ${member.roles_count}`, 'info');
+          if (member.premium_since) addLog(`  Boosting Since: ${new Date(member.premium_since).toLocaleDateString()}`, 'info');
+          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${member.communication_disabled_until}`, 'fail');
+        } else if (data.member_error) {
+          addLog(`  Guild: ${data.member_error}`, 'fail');
+        }
+        
+        addLog(`═══════════════════════════════`, 'success');
+        toast.success(`Found user: ${user.username}`);
       } else {
-        addLog(`✗ ${data?.message || data?.error || 'Boost failed'}`, 'fail');
-        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
-        toast.error(data?.message || data?.error || 'Boost failed');
+        addLog(`✗ ${data?.error || 'User not found'}`, 'fail');
+        toast.error(data?.error || 'User not found');
       }
 
       setIsRunning(false);
-      addLog('Boost request complete!', 'info');
+      addLog('Discord check complete!', 'info');
     } catch (err) {
       addLog(`❌ Error: ${err}`, 'fail');
-      setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
       setIsRunning(false);
     }
   };
@@ -839,7 +873,7 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     { mode: 'checker' as Mode, label: 'CODM Checker', icon: Play, shortLabel: 'Checker' },
     { mode: 'searcher' as Mode, label: 'Searcher Domain', icon: Search, shortLabel: 'Searcher' },
     { mode: 'bomber' as Mode, label: 'SMS Bomber', icon: Zap, shortLabel: 'Bomber' },
-    { mode: 'booster' as Mode, label: 'Social Boost', icon: Rocket, shortLabel: 'Booster' },
+    { mode: 'discord' as Mode, label: 'Discord Checker', icon: UserSearch, shortLabel: 'Discord' },
     { mode: 'remover' as Mode, label: 'URL Remover', icon: Link2Off, shortLabel: 'Remover' },
   ];
 
@@ -991,51 +1025,80 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
               </button>
             </div>
           </div>
-        ) : mode === 'booster' ? (
+        ) : mode === 'discord' ? (
           <div className="space-y-4">
             <div className="neon-border rounded-xl glass-panel px-4 py-4">
-              <label className="text-muted-foreground text-xs font-medium block mb-2">URL to Boost</label>
+              <label className="text-muted-foreground text-xs font-medium block mb-2">Discord User ID</label>
               <div className="flex items-center gap-3">
-                <TrendingUp className="w-5 h-5 text-primary shrink-0" />
-                <input type="url" value={boostUrl}
-                  onChange={(e) => setBoostUrl(e.target.value.slice(0, MAX_URL_LENGTH))}
-                  placeholder="https://tiktok.com/... or t.me/..."
+                <UserSearch className="w-5 h-5 text-primary shrink-0" />
+                <input type="text" value={discordUserId}
+                  onChange={(e) => setDiscordUserId(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                  placeholder="Enter User ID (e.g. 123456789012345678)"
                   className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/50 focus:outline-none font-mono text-sm"
                   disabled={isRunning} />
               </div>
             </div>
             <div className="neon-border rounded-xl glass-panel px-4 py-4">
-              <label className="text-muted-foreground text-xs font-medium block mb-3">Boost Type</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {([
-                  { type: 'tiktok_views' as BoostType, label: 'TikTok Views', icon: Eye, color: 'text-pink-400' },
-                  { type: 'tiktok_likes' as BoostType, label: 'TikTok Likes', icon: Heart, color: 'text-red-400' },
-                  { type: 'tiktok_followers' as BoostType, label: 'TikTok Followers', icon: Users, color: 'text-blue-400' },
-                  { type: 'telegram_views' as BoostType, label: 'Telegram Views', icon: Eye, color: 'text-sky-400' },
-                  { type: 'facebook_shares' as BoostType, label: 'FB Shares', icon: Share2, color: 'text-blue-600' },
-                ]).map((boost) => (
-                  <button key={boost.type} onClick={() => setSelectedBoostType(boost.type)} disabled={isRunning}
-                    className={`py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5
-                      ${selectedBoostType === boost.type 
-                        ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' 
-                        : 'bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground'
-                      } disabled:opacity-50`}>
-                    <boost.icon className={`w-3.5 h-3.5 ${selectedBoostType === boost.type ? '' : boost.color}`} />
-                    <span className="truncate">{boost.label}</span>
-                  </button>
-                ))}
+              <label className="text-muted-foreground text-xs font-medium block mb-2">Guild ID <span className="text-muted-foreground/50">(optional)</span></label>
+              <div className="flex items-center gap-3">
+                <Shield className="w-5 h-5 text-primary/60 shrink-0" />
+                <input type="text" value={discordGuildId}
+                  onChange={(e) => setDiscordGuildId(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                  placeholder="Enter Guild ID for member info"
+                  className="flex-1 bg-transparent text-foreground text-base placeholder:text-muted-foreground/50 focus:outline-none font-mono text-sm"
+                  disabled={isRunning} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <button onClick={handleStart} disabled={isRunning || !boostUrl.trim()}
+
+            {/* Discord Result Card */}
+            {discordResult?.user && (
+              <div className="neon-border rounded-xl glass-panel px-4 py-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  {discordResult.user.avatar_url && (
+                    <img src={discordResult.user.avatar_url} alt="Avatar" className="w-12 h-12 rounded-full border-2 border-primary/30" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-foreground font-bold text-sm truncate">{discordResult.user.global_name || discordResult.user.username}</p>
+                    <p className="text-muted-foreground text-xs font-mono">@{discordResult.user.username}</p>
+                    <p className="text-muted-foreground/60 text-[10px] font-mono">{discordResult.user.id}</p>
+                  </div>
+                  {discordResult.user.is_bot && (
+                    <span className="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full">BOT</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-secondary/30 rounded-lg p-2">
+                    <p className="text-muted-foreground text-[10px]">Created</p>
+                    <p className="text-foreground font-mono">{new Date(discordResult.user.created_at).toLocaleDateString()}</p>
+                  </div>
+                  {discordResult.user.flags.length > 0 && (
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Badges</p>
+                      <p className="text-foreground font-mono text-[10px]">{discordResult.user.flags.join(', ')}</p>
+                    </div>
+                  )}
+                  {discordResult.member && (
+                    <>
+                      <div className="bg-secondary/30 rounded-lg p-2">
+                        <p className="text-muted-foreground text-[10px]">Joined Guild</p>
+                        <p className="text-foreground font-mono">{discordResult.member.joined_at ? new Date(discordResult.member.joined_at).toLocaleDateString() : 'N/A'}</p>
+                      </div>
+                      <div className="bg-secondary/30 rounded-lg p-2">
+                        <p className="text-muted-foreground text-[10px]">Roles</p>
+                        <p className="text-foreground font-mono">{discordResult.member.roles_count}</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button onClick={handleStart} disabled={isRunning || !discordUserId.trim()}
                 className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
                            disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                <Rocket className="w-4 h-4" /> Boost
-              </button>
-              <button onClick={handleStop} disabled={!isRunning}
-                className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
-                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                <Square className="w-4 h-4" /> Stop
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserSearch className="w-4 h-4" />}
+                {isProcessing ? 'Checking...' : 'Check'}
               </button>
               <button onClick={handleRefresh} disabled={isRunning}
                 className="neon-button py-3 rounded-xl font-display text-sm font-medium text-foreground
@@ -1134,19 +1197,6 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             <div key={index} className="stat-card neon-border rounded-xl glass-panel p-2 sm:p-3 text-center">
               <p className="text-muted-foreground text-[10px] sm:text-[11px] font-medium mb-1 uppercase tracking-wider">{stat.label}</p>
               <p className={`text-lg sm:text-xl font-display font-bold ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
-        </div>
-      ) : mode === 'booster' ? (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Success', value: boosterStats.success, color: 'text-green-400' },
-            { label: 'Failed', value: boosterStats.fail, color: 'text-red-400' },
-            { label: 'Total', value: boosterStats.total, color: 'text-foreground' },
-          ].map((stat, index) => (
-            <div key={index} className="stat-card neon-border rounded-xl glass-panel p-3 sm:p-4 text-center">
-              <p className="text-muted-foreground text-[11px] font-medium mb-1 uppercase tracking-wider">{stat.label}</p>
-              <p className={`text-xl sm:text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
             </div>
           ))}
         </div>
