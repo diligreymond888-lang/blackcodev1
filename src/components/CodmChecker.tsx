@@ -708,19 +708,12 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     }
   };
 
-  const processBoosting = async () => {
-    const cleanUrl = sanitizeInput(boostUrl.trim());
+  const processDiscordCheck = async () => {
+    const cleanUserId = sanitizeInput(discordUserId.trim());
+    const cleanGuildId = discordGuildId.trim() ? sanitizeInput(discordGuildId.trim()) : undefined;
 
-    const boostTypeLabels: Record<BoostType, string> = {
-      tiktok_views: 'TikTok Views',
-      tiktok_likes: 'TikTok Likes',
-      tiktok_followers: 'TikTok Followers',
-      telegram_views: 'Telegram Views',
-      facebook_shares: 'Facebook Shares',
-    };
-
-    addLog(`Boosting: ${boostTypeLabels[selectedBoostType]}`, 'info');
-    addLog(`URL: ${cleanUrl}`, 'info');
+    addLog(`Checking Discord User ID: ${cleanUserId}`, 'info');
+    if (cleanGuildId) addLog(`Guild ID: ${cleanGuildId}`, 'info');
 
     try {
       if (!checkRateLimitLocal()) {
@@ -728,33 +721,54 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         await new Promise(resolve => setTimeout(resolve, 30000));
       }
 
-      addLog('Sending boost request...', 'info');
+      addLog('Fetching user data from Discord API...', 'info');
 
-      const { data, error } = await supabase.functions.invoke('social-boost', {
-        body: { action: selectedBoostType, url: cleanUrl }
+      const { data, error } = await supabase.functions.invoke('discord-checker', {
+        body: { user_id: cleanUserId, guild_id: cleanGuildId }
       });
 
       if (error) {
         addLog(`❌ Error: ${error.message}`, 'fail');
-        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
-        toast.error(`Boost failed: ${error.message}`);
-      } else if (data?.success) {
-        addLog(`✓ ${data.message}`, 'success');
-        if (data.orderId) addLog(`Order ID: ${data.orderId}`, 'info');
-        if (data.userInfo) addLog(`User: ${data.userInfo.nickname} (${data.userInfo.followers} followers)`, 'info');
-        setBoosterStats(prev => ({ ...prev, success: prev.success + 1, total: prev.total + 1 }));
-        toast.success(data.message);
+        toast.error(`Discord check failed: ${error.message}`);
+      } else if (data?.success && data?.user) {
+        const user = data.user as DiscordUserInfo;
+        setDiscordResult({ user, member: data.member, member_error: data.member_error });
+        
+        addLog(`═══════════════════════════════`, 'success');
+        addLog(`  DISCORD USER FOUND`, 'success');
+        addLog(`  Username: ${user.username}`, 'success');
+        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'success');
+        addLog(`  ID: ${user.id}`, 'info');
+        addLog(`  Bot: ${user.is_bot ? 'Yes' : 'No'}`, 'info');
+        addLog(`  Created: ${new Date(user.created_at).toLocaleDateString()}`, 'info');
+        if (user.flags.length > 0) addLog(`  Badges: ${user.flags.join(', ')}`, 'info');
+        if (user.avatar_url) addLog(`  Avatar: ${user.avatar_url}`, 'info');
+        if (user.banner_url) addLog(`  Banner: ${user.banner_url}`, 'info');
+        
+        if (data.member) {
+          const member = data.member as DiscordMemberInfo;
+          addLog(``, 'info');
+          addLog(`  GUILD MEMBER INFO`, 'success');
+          if (member.nick) addLog(`  Nickname: ${member.nick}`, 'info');
+          if (member.joined_at) addLog(`  Joined: ${new Date(member.joined_at).toLocaleDateString()}`, 'info');
+          addLog(`  Roles: ${member.roles_count}`, 'info');
+          if (member.premium_since) addLog(`  Boosting Since: ${new Date(member.premium_since).toLocaleDateString()}`, 'info');
+          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${member.communication_disabled_until}`, 'fail');
+        } else if (data.member_error) {
+          addLog(`  Guild: ${data.member_error}`, 'fail');
+        }
+        
+        addLog(`═══════════════════════════════`, 'success');
+        toast.success(`Found user: ${user.username}`);
       } else {
-        addLog(`✗ ${data?.message || data?.error || 'Boost failed'}`, 'fail');
-        setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
-        toast.error(data?.message || data?.error || 'Boost failed');
+        addLog(`✗ ${data?.error || 'User not found'}`, 'fail');
+        toast.error(data?.error || 'User not found');
       }
 
       setIsRunning(false);
-      addLog('Boost request complete!', 'info');
+      addLog('Discord check complete!', 'info');
     } catch (err) {
       addLog(`❌ Error: ${err}`, 'fail');
-      setBoosterStats(prev => ({ ...prev, fail: prev.fail + 1, total: prev.total + 1 }));
       setIsRunning(false);
     }
   };
