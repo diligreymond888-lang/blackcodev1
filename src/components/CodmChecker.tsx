@@ -117,9 +117,9 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const [selectedDomain, setSelectedDomain] = useState(true);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [bomberIterations, setBomberIterations] = useState(5);
-  const [boostUrl, setBoostUrl] = useState('');
-  const [selectedBoostType, setSelectedBoostType] = useState<BoostType>('tiktok_views');
-  const [boosterStats, setBoosterStats] = useState<BoosterStats>({ success: 0, fail: 0, total: 0 });
+  const [discordUserId, setDiscordUserId] = useState('');
+  const [discordGuildId, setDiscordGuildId] = useState('');
+  const [discordResult, setDiscordResult] = useState<{ user?: DiscordUserInfo; member?: DiscordMemberInfo; member_error?: string } | null>(null);
   const [removerStats, setRemoverStats] = useState<RemoverStats>({ urlsRemoved: 0, linesProcessed: 0, totalLines: 0 });
   const [cleanedContent, setCleanedContent] = useState<string[]>([]);
   const [stats, setStats] = useState<Stats>({ valid: 0, invalid: 0, clean: 0, notClean: 0, hasCodm: 0 });
