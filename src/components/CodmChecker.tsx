@@ -1200,19 +1200,6 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
             </div>
           ))}
         </div>
-      ) : mode === 'booster' ? (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Success', value: boosterStats.success, color: 'text-green-400' },
-            { label: 'Failed', value: boosterStats.fail, color: 'text-red-400' },
-            { label: 'Total', value: boosterStats.total, color: 'text-foreground' },
-          ].map((stat, index) => (
-            <div key={index} className="stat-card neon-border rounded-xl glass-panel p-3 sm:p-4 text-center">
-              <p className="text-muted-foreground text-[11px] font-medium mb-1 uppercase tracking-wider">{stat.label}</p>
-              <p className={`text-xl sm:text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
-        </div>
       ) : mode === 'remover' ? (
         <div className="grid grid-cols-3 gap-3">
           {[
