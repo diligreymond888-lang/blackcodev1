@@ -44,14 +44,21 @@ interface DiscordUserInfo {
   username: string;
   discriminator: string;
   global_name: string | null;
+  avatar: string | null;
   avatar_url: string | null;
+  avatar_decoration: string | null;
+  banner: string | null;
   banner_url: string | null;
-  accent_color: number | null;
+  accent_color: string | null;
+  banner_color: string | null;
   is_bot: boolean;
   is_system: boolean;
   created_at: string;
   flags: string[];
-  banner_color: string | null;
+  public_flags_raw: number;
+  premium_type: number;
+  has_animated_avatar: boolean;
+  has_animated_banner: boolean;
 }
 
 interface DiscordMemberInfo {
