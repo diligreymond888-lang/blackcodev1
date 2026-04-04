@@ -242,7 +242,8 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
   const handleRefresh = () => {
     resetStats();
     setPhoneNumber('');
-    setBoostUrl('');
+    setDiscordUserId('');
+    setDiscordGuildId('');
     addLog('Ready...', 'info');
   };
 
