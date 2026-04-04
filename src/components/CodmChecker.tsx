@@ -8,7 +8,7 @@ import RetryIndicator from './RetryIndicator';
 import ProgressHeader from './ProgressHeader';
 import CookieStatusIndicator from './CookieStatusIndicator';
 
-type Mode = 'checker' | 'searcher' | 'bomber' | 'booster' | 'remover';
+type Mode = 'checker' | 'searcher' | 'bomber' | 'discord' | 'remover';
 interface KeyInfo {
   status: string;
   duration: string;
