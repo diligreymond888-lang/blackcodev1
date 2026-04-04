@@ -305,12 +305,13 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
     resetStats();
     setFile(null);
     setPhoneNumber('');
-    setBoostUrl('');
+    setDiscordUserId('');
+    setDiscordGuildId('');
     const modeNames = {
       checker: 'CODM Checker',
       searcher: 'Searcher Domain',
       bomber: 'SMS Bomber',
-      booster: 'Social Boost',
+      discord: 'Discord Checker',
       remover: 'URL Remover'
     };
     addLog(`Switched to ${modeNames[newMode]} mode`, 'info');
