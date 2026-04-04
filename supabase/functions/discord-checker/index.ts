@@ -142,10 +142,13 @@ serve(async (req) => {
     const createdAt = snowflakeToDate(cleanUserId);
     const flags = formatUserFlags(Number(user.public_flags || 0));
     const avatarUrl = user.avatar
-      ? `https://cdn.discordapp.com/avatars/${cleanUserId}/${user.avatar}.${String(user.avatar).startsWith("a_") ? "gif" : "png"}?size=256`
-      : null;
+      ? `https://cdn.discordapp.com/avatars/${cleanUserId}/${user.avatar}.${String(user.avatar).startsWith("a_") ? "gif" : "png"}?size=512`
+      : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator || 0) % 5}.png`;
     const bannerUrl = user.banner
-      ? `https://cdn.discordapp.com/banners/${cleanUserId}/${user.banner}.${String(user.banner).startsWith("a_") ? "gif" : "png"}?size=512`
+      ? `https://cdn.discordapp.com/banners/${cleanUserId}/${user.banner}.${String(user.banner).startsWith("a_") ? "gif" : "png"}?size=600`
+      : null;
+    const avatarDecorationUrl = user.avatar_decoration_data 
+      ? `https://cdn.discordapp.com/avatar-decoration-presets/${(user.avatar_decoration_data as Record<string,string>).asset}.png`
       : null;
 
     const result: Record<string, unknown> = {
@@ -155,14 +158,21 @@ serve(async (req) => {
         username: user.username,
         discriminator: user.discriminator,
         global_name: user.global_name || null,
+        avatar: user.avatar || null,
         avatar_url: avatarUrl,
+        avatar_decoration: avatarDecorationUrl,
+        banner: user.banner || null,
         banner_url: bannerUrl,
-        accent_color: user.accent_color || null,
+        accent_color: user.accent_color ? `#${Number(user.accent_color).toString(16).padStart(6, '0')}` : null,
+        banner_color: user.banner_color || null,
         is_bot: user.bot || false,
         is_system: user.system || false,
         created_at: createdAt,
         flags,
-        banner_color: user.banner_color || null,
+        public_flags_raw: user.public_flags || 0,
+        premium_type: user.premium_type || 0,
+        has_animated_avatar: user.avatar ? String(user.avatar).startsWith("a_") : false,
+        has_animated_banner: user.banner ? String(user.banner).startsWith("a_") : false,
       },
     };
 

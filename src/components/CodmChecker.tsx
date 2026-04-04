@@ -44,14 +44,21 @@ interface DiscordUserInfo {
   username: string;
   discriminator: string;
   global_name: string | null;
+  avatar: string | null;
   avatar_url: string | null;
+  avatar_decoration: string | null;
+  banner: string | null;
   banner_url: string | null;
-  accent_color: number | null;
+  accent_color: string | null;
+  banner_color: string | null;
   is_bot: boolean;
   is_system: boolean;
   created_at: string;
   flags: string[];
-  banner_color: string | null;
+  public_flags_raw: number;
+  premium_type: number;
+  has_animated_avatar: boolean;
+  has_animated_banner: boolean;
 }
 
 interface DiscordMemberInfo {
@@ -736,30 +743,55 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
         
         addLog(`═══════════════════════════════`, 'success');
         addLog(`  DISCORD USER FOUND`, 'success');
-        addLog(`  Username: ${user.username}`, 'success');
-        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'success');
-        addLog(`  ID: ${user.id}`, 'info');
-        addLog(`  Bot: ${user.is_bot ? 'Yes' : 'No'}`, 'info');
-        addLog(`  Created: ${new Date(user.created_at).toLocaleDateString()}`, 'info');
-        if (user.flags.length > 0) addLog(`  Badges: ${user.flags.join(', ')}`, 'info');
-        if (user.avatar_url) addLog(`  Avatar: ${user.avatar_url}`, 'info');
-        if (user.banner_url) addLog(`  Banner: ${user.banner_url}`, 'info');
+        addLog(`═══════════════════════════════`, 'success');
+        addLog(``, 'info');
+        addLog(`  BASIC INFO`, 'success');
+        addLog(`  Username: ${user.username}`, 'info');
+        if (user.global_name) addLog(`  Display Name: ${user.global_name}`, 'info');
+        addLog(`  User ID: ${user.id}`, 'info');
+        addLog(`  Discriminator: #${user.discriminator}`, 'info');
+        addLog(`  Bot Account: ${user.is_bot ? 'Yes' : 'No'}`, user.is_bot ? 'retry' : 'info');
+        addLog(`  System Account: ${user.is_system ? 'Yes' : 'No'}`, 'info');
+        addLog(``, 'info');
+        addLog(`  ACCOUNT DETAILS`, 'success');
+        addLog(`  Created: ${new Date(user.created_at).toLocaleString()}`, 'info');
+        const premiumLabels: Record<number, string> = { 0: 'None', 1: 'Nitro Classic', 2: 'Nitro', 3: 'Nitro Basic' };
+        addLog(`  Nitro: ${premiumLabels[user.premium_type] || 'Unknown'}`, user.premium_type > 0 ? 'hasCodm' : 'info');
+        addLog(``, 'info');
+        addLog(`  PROFILE`, 'success');
+        addLog(`  Avatar: ${user.avatar || 'Default'}${user.has_animated_avatar ? ' (Animated)' : ''}`, 'info');
+        if (user.avatar_url) addLog(`  Avatar URL: ${user.avatar_url}`, 'info');
+        if (user.avatar_decoration) addLog(`  Avatar Decoration: Yes`, 'hasCodm');
+        addLog(`  Banner: ${user.banner ? 'Custom' : 'None'}${user.has_animated_banner ? ' (Animated)' : ''}`, 'info');
+        if (user.banner_url) addLog(`  Banner URL: ${user.banner_url}`, 'info');
+        if (user.accent_color) addLog(`  Accent Color: ${user.accent_color}`, 'info');
+        if (user.banner_color) addLog(`  Banner Color: ${user.banner_color}`, 'info');
+        addLog(``, 'info');
+        if (user.flags.length > 0) {
+          addLog(`  BADGES (${user.flags.length})`, 'success');
+          user.flags.forEach(flag => addLog(`  ⭐ ${flag}`, 'hasCodm'));
+          addLog(``, 'info');
+        }
         
         if (data.member) {
           const member = data.member as DiscordMemberInfo;
-          addLog(``, 'info');
           addLog(`  GUILD MEMBER INFO`, 'success');
-          if (member.nick) addLog(`  Nickname: ${member.nick}`, 'info');
-          if (member.joined_at) addLog(`  Joined: ${new Date(member.joined_at).toLocaleDateString()}`, 'info');
+          if (member.nick) addLog(`  Server Nickname: ${member.nick}`, 'info');
+          if (member.joined_at) addLog(`  Joined Server: ${new Date(member.joined_at).toLocaleString()}`, 'info');
           addLog(`  Roles: ${member.roles_count}`, 'info');
-          if (member.premium_since) addLog(`  Boosting Since: ${new Date(member.premium_since).toLocaleDateString()}`, 'info');
-          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${member.communication_disabled_until}`, 'fail');
+          addLog(`  Server Muted: ${member.is_muted ? 'Yes' : 'No'}`, member.is_muted ? 'fail' : 'info');
+          addLog(`  Server Deafened: ${member.is_deafened ? 'Yes' : 'No'}`, member.is_deafened ? 'fail' : 'info');
+          addLog(`  Pending Verification: ${member.pending ? 'Yes' : 'No'}`, member.pending ? 'retry' : 'info');
+          if (member.premium_since) addLog(`  Server Boosting Since: ${new Date(member.premium_since).toLocaleString()}`, 'hasCodm');
+          if (member.communication_disabled_until) addLog(`  Timed Out Until: ${new Date(member.communication_disabled_until).toLocaleString()}`, 'fail');
+          addLog(``, 'info');
         } else if (data.member_error) {
-          addLog(`  Guild: ${data.member_error}`, 'fail');
+          addLog(`  Guild Info: ${data.member_error}`, 'fail');
+          addLog(``, 'info');
         }
         
         addLog(`═══════════════════════════════`, 'success');
-        toast.success(`Found user: ${user.username}`);
+        toast.success(`Found user: ${user.global_name || user.username}`);
       } else {
         addLog(`✗ ${data?.error || 'User not found'}`, 'fail');
         toast.error(data?.error || 'User not found');
@@ -1052,42 +1084,121 @@ const CodmChecker = ({ keyInfo }: CodmCheckerProps) => {
 
             {/* Discord Result Card */}
             {discordResult?.user && (
-              <div className="neon-border rounded-xl glass-panel px-4 py-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  {discordResult.user.avatar_url && (
-                    <img src={discordResult.user.avatar_url} alt="Avatar" className="w-12 h-12 rounded-full border-2 border-primary/30" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-foreground font-bold text-sm truncate">{discordResult.user.global_name || discordResult.user.username}</p>
-                    <p className="text-muted-foreground text-xs font-mono">@{discordResult.user.username}</p>
-                    <p className="text-muted-foreground/60 text-[10px] font-mono">{discordResult.user.id}</p>
+              <div className="neon-border rounded-xl glass-panel overflow-hidden">
+                {/* Banner */}
+                {discordResult.user.banner_url ? (
+                  <div className="h-24 w-full overflow-hidden">
+                    <img src={discordResult.user.banner_url} alt="Banner" className="w-full h-full object-cover" />
                   </div>
-                  {discordResult.user.is_bot && (
-                    <span className="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full">BOT</span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-secondary/30 rounded-lg p-2">
-                    <p className="text-muted-foreground text-[10px]">Created</p>
-                    <p className="text-foreground font-mono">{new Date(discordResult.user.created_at).toLocaleDateString()}</p>
+                ) : discordResult.user.accent_color ? (
+                  <div className="h-16 w-full" style={{ backgroundColor: discordResult.user.accent_color }} />
+                ) : (
+                  <div className="h-16 w-full bg-gradient-to-r from-primary/30 to-primary/10" />
+                )}
+
+                <div className="px-4 py-4 space-y-3 -mt-8">
+                  {/* Avatar + Name */}
+                  <div className="flex items-end gap-3">
+                    <img src={discordResult.user.avatar_url || ''} alt="Avatar" 
+                      className="w-16 h-16 rounded-full border-4 border-background shadow-lg" />
+                    <div className="flex-1 min-w-0 pb-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-foreground font-bold text-sm truncate">{discordResult.user.global_name || discordResult.user.username}</p>
+                        {discordResult.user.is_bot && (
+                          <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-[9px] font-bold rounded shrink-0">BOT</span>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground text-xs font-mono">@{discordResult.user.username}#{discordResult.user.discriminator}</p>
+                    </div>
                   </div>
+
+                  {/* Info Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">User ID</p>
+                      <p className="text-foreground font-mono text-[10px] break-all">{discordResult.user.id}</p>
+                    </div>
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Created</p>
+                      <p className="text-foreground font-mono text-[10px]">{new Date(discordResult.user.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Nitro</p>
+                      <p className={`font-mono text-[10px] ${discordResult.user.premium_type > 0 ? 'text-purple-400' : 'text-foreground'}`}>
+                        {({ 0: 'None', 1: 'Classic', 2: 'Nitro', 3: 'Basic' } as Record<number, string>)[discordResult.user.premium_type] || 'Unknown'}
+                      </p>
+                    </div>
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Avatar</p>
+                      <p className="text-foreground font-mono text-[10px]">
+                        {discordResult.user.avatar ? (discordResult.user.has_animated_avatar ? 'Animated' : 'Custom') : 'Default'}
+                      </p>
+                    </div>
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Banner</p>
+                      <p className="text-foreground font-mono text-[10px]">
+                        {discordResult.user.banner ? (discordResult.user.has_animated_banner ? 'Animated' : 'Custom') : 'None'}
+                      </p>
+                    </div>
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">Decoration</p>
+                      <p className={`font-mono text-[10px] ${discordResult.user.avatar_decoration ? 'text-purple-400' : 'text-foreground'}`}>
+                        {discordResult.user.avatar_decoration ? 'Yes' : 'None'}
+                      </p>
+                    </div>
+                    {discordResult.user.accent_color && (
+                      <div className="bg-secondary/30 rounded-lg p-2">
+                        <p className="text-muted-foreground text-[10px]">Accent Color</p>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded-full border border-border/30" style={{ backgroundColor: discordResult.user.accent_color }} />
+                          <p className="text-foreground font-mono text-[10px]">{discordResult.user.accent_color}</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="bg-secondary/30 rounded-lg p-2">
+                      <p className="text-muted-foreground text-[10px]">System</p>
+                      <p className="text-foreground font-mono text-[10px]">{discordResult.user.is_system ? 'Yes' : 'No'}</p>
+                    </div>
+                  </div>
+
+                  {/* Badges */}
                   {discordResult.user.flags.length > 0 && (
                     <div className="bg-secondary/30 rounded-lg p-2">
-                      <p className="text-muted-foreground text-[10px]">Badges</p>
-                      <p className="text-foreground font-mono text-[10px]">{discordResult.user.flags.join(', ')}</p>
+                      <p className="text-muted-foreground text-[10px] mb-1.5">Badges ({discordResult.user.flags.length})</p>
+                      <div className="flex flex-wrap gap-1">
+                        {discordResult.user.flags.map((flag, i) => (
+                          <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary text-[9px] font-medium rounded-full border border-primary/20">
+                            ⭐ {flag}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
+
+                  {/* Guild Member Info */}
                   {discordResult.member && (
-                    <>
-                      <div className="bg-secondary/30 rounded-lg p-2">
-                        <p className="text-muted-foreground text-[10px]">Joined Guild</p>
-                        <p className="text-foreground font-mono">{discordResult.member.joined_at ? new Date(discordResult.member.joined_at).toLocaleDateString() : 'N/A'}</p>
+                    <div className="bg-secondary/30 rounded-lg p-2 space-y-1.5">
+                      <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">Guild Member</p>
+                      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                        {discordResult.member.nick && (
+                          <div><span className="text-muted-foreground">Nick: </span><span className="text-foreground font-mono">{discordResult.member.nick}</span></div>
+                        )}
+                        <div><span className="text-muted-foreground">Joined: </span><span className="text-foreground font-mono">{discordResult.member.joined_at ? new Date(discordResult.member.joined_at).toLocaleDateString() : 'N/A'}</span></div>
+                        <div><span className="text-muted-foreground">Roles: </span><span className="text-foreground font-mono">{discordResult.member.roles_count}</span></div>
+                        <div><span className="text-muted-foreground">Muted: </span><span className={`font-mono ${discordResult.member.is_muted ? 'text-red-400' : 'text-foreground'}`}>{discordResult.member.is_muted ? 'Yes' : 'No'}</span></div>
+                        <div><span className="text-muted-foreground">Deafened: </span><span className={`font-mono ${discordResult.member.is_deafened ? 'text-red-400' : 'text-foreground'}`}>{discordResult.member.is_deafened ? 'Yes' : 'No'}</span></div>
+                        <div><span className="text-muted-foreground">Pending: </span><span className={`font-mono ${discordResult.member.pending ? 'text-yellow-400' : 'text-foreground'}`}>{discordResult.member.pending ? 'Yes' : 'No'}</span></div>
+                        {discordResult.member.premium_since && (
+                          <div className="col-span-2"><span className="text-muted-foreground">Boosting: </span><span className="text-purple-400 font-mono">Since {new Date(discordResult.member.premium_since).toLocaleDateString()}</span></div>
+                        )}
+                        {discordResult.member.communication_disabled_until && (
+                          <div className="col-span-2"><span className="text-muted-foreground">Timeout: </span><span className="text-red-400 font-mono">{new Date(discordResult.member.communication_disabled_until).toLocaleString()}</span></div>
+                        )}
                       </div>
-                      <div className="bg-secondary/30 rounded-lg p-2">
-                        <p className="text-muted-foreground text-[10px]">Roles</p>
-                        <p className="text-foreground font-mono">{discordResult.member.roles_count}</p>
-                      </div>
-                    </>
+                    </div>
+                  )}
+                  {discordResult.member_error && (
+                    <p className="text-red-400 text-[10px] font-mono">Guild: {discordResult.member_error}</p>
                   )}
                 </div>
               </div>
